@@ -132,10 +132,11 @@ def carregar_candidaturas(raw, anos, bens, tab):
         if anos and ano not in anos:
             continue
         df = ler_csv(caminho, COLS_CAND)
-        # Quem foi ao 2º turno aparece duas vezes; fica a linha do último turno.
+        # Quem foi ao 2º turno aparece duas vezes (com CD_ELEICAO diferente, mas o
+        # mesmo SQ_CANDIDATO); fica a linha do último turno.
         df["_turno"] = pd.to_numeric(df["NR_TURNO"], errors="coerce").fillna(1)
         df = (df.sort_values("_turno", kind="stable")
-                .drop_duplicates(["CD_ELEICAO", "SQ_CANDIDATO"], keep="last")
+                .drop_duplicates(["SQ_CANDIDATO"], keep="last")
                 .reset_index(drop=True))
         suplementar = df["NM_TIPO_ELEICAO"].str.upper().str.contains("SUPLEMENTAR")
         eleicao = df["DS_ELEICAO"].where(suplementar, "")
