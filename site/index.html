@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Raio-X Político</title>
+  <meta name="description" content="Busque um nome e veja se a pessoa já foi candidata, se foi eleita, por quais partidos e a evolução do patrimônio declarado ao TSE.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topo">
+    <div class="wrap">
+      <a href="#" class="marca" id="home">Raio-X <strong>Político</strong></a>
+      <p class="sub">Histórico de candidaturas, partidos e patrimônio declarado ao TSE</p>
+      <form id="busca" class="busca" role="search">
+        <input id="q" type="search" autocomplete="off" spellcheck="false"
+               placeholder="Digite o nome completo ou o nome de urna" aria-label="Nome">
+        <button type="submit">Buscar</button>
+      </form>
+      <p class="dica">Ex.: <a href="#q=Jair Messias Bolsonaro">Jair Messias Bolsonaro</a> · <a href="#q=Lula">Lula</a> · <a href="#q=Simone Tebet">Simone Tebet</a></p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="status" class="status" aria-live="polite"></div>
+    <section id="resultados"></section>
+    <section id="ficha"></section>
+  </main>
+
+  <footer class="wrap rodape">
+    <p>Dados: <a href="https://dadosabertos.tse.jus.br" target="_blank" rel="noopener">Portal de Dados Abertos do TSE</a>,
+      candidaturas desde 1994 e bens declarados desde 2006. <span id="meta-info"></span></p>
+    <p>As candidaturas da mesma pessoa são agrupadas automaticamente (CPF, título de eleitor ou nome + data de nascimento);
+      homônimos podem aparecer separados ou, raramente, misturados. “Eleito” reflete o resultado da eleição e não garante posse ou mandato completo.
+      Valores de bens são nominais (sem correção pela inflação), exatamente como declarados.</p>
+    <p><a href="https://github.com/FernandoCunhaJunior/raio-x-politico" target="_blank" rel="noopener">Código no GitHub</a></p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
