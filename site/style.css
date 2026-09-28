@@ -53,10 +53,10 @@ a { color: var(--link); }
 /* ---------- Barra da marca ---------- */
 .barra-marca { background: #fff; border-bottom: 4px solid var(--vermelho); position: relative; z-index: 2; }
 .barra-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 76px; }
-.logo { display: block; height: 100%; padding: 8px 0; }
-.logo img { height: 100%; width: auto; display: block; }
-.produto { color: var(--grafite-2); font-size: 1.05rem; letter-spacing: .02em; white-space: nowrap; }
-.produto strong { color: var(--vermelho); }
+.logo { display: block; height: 100%; padding: 10px 0; min-width: 0; }
+.logo img { height: 100%; width: auto; max-width: 100%; display: block; object-fit: contain; }
+.logo-mpba { padding: 12px 0; }
+.logo-unai img { object-position: right center; }
 
 /* ---------- Hero ---------- */
 .hero {
@@ -252,15 +252,15 @@ td.partido-cel { white-space: normal; min-width: 90px; }
 /* ---------- Rodapé ---------- */
 .rodape { background: var(--grafite); color: #cfcdca; margin-top: 24px; border-top: 4px solid var(--vermelho); }
 .rodape-inner { display: flex; gap: 24px; align-items: flex-start; padding-top: 28px; padding-bottom: 36px; font-size: .86rem; }
-.rodape-marca { flex: none; background: #fff; border-radius: 12px; padding: 8px 12px; }
-.rodape-marca img { display: block; height: 44px; width: auto; }
+.rodape-marca { flex: none; background: #fff; border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.rodape-marca img { display: block; height: 40px; width: auto; }
 .rodape p { margin: 0 0 8px; }
 .rodape strong { color: #fff; }
 .rodape a { color: #ff7b80; }
 
 @media (max-width: 640px) {
   .barra-inner { height: 60px; }
-  .produto { font-size: .9rem; }
+  .logo, .logo-mpba { padding: 8px 0; }
   .hero-inner { padding-top: 32px; }
   .fita { opacity: .15; width: 100%; right: -30%; }
   .busca button { padding: 0 16px; }
