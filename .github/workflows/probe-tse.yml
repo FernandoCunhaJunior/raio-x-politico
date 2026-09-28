@@ -1,0 +1,24 @@
+name: Teste de acesso ao TSE
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Testar download do CDN do TSE
+        run: |
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+          for f in consulta_cand/consulta_cand_1994.zip consulta_cand/consulta_cand_2024.zip bem_candidato/bem_candidato_2024.zip; do
+            echo "== $f"
+            curl -sS -o /dev/null -w "curl-simples: %{http_code}\n" "https://cdn.tse.jus.br/estatistica/sead/odsele/$f" --max-time 30 -r 0-99 || true
+            curl -sS -o /dev/null -w "curl-navegador: %{http_code}\n" -A "$UA" -H "Accept: */*" -H "Accept-Language: pt-BR,pt;q=0.9" -H "Referer: https://dadosabertos.tse.jus.br/" "https://cdn.tse.jus.br/estatistica/sead/odsele/$f" --max-time 30 -r 0-99 || true
+          done
+          curl -s https://ipinfo.io/country
+      - name: Baixar e inspecionar 1994 (cabeçalhos das colunas)
+        run: |
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+          curl -sS -f -A "$UA" -H "Referer: https://dadosabertos.tse.jus.br/" -o c.zip "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_1994.zip" || exit 0
+          unzip -l c.zip
+          f=$(unzip -Z1 c.zip | grep -i csv | head -1); unzip -p c.zip "$f" | head -3 | iconv -f latin1 -t utf-8
