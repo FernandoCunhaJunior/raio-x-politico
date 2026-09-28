@@ -58,7 +58,23 @@ COLS_CAND = [
     "DS_GENERO", "DS_GRAU_INSTRUCAO", "DS_COR_RACA", "SG_UF_NASCIMENTO",
     "DS_COMPOSICAO_COLIGACAO", "DS_COMPOSICAO_FEDERACAO",
 ]
-COLS_BENS = ["SG_UE", "SQ_CANDIDATO", "VR_BEM_CANDIDATO", "DS_TIPO_BEM_CANDIDATO"]
+COLS_BENS = ["SG_UE", "SQ_CANDIDATO", "VR_BEM_CANDIDATO", "DS_TIPO_BEM_CANDIDATO", "DS_BEM_CANDIDATO"]
+# Colunas que não existem em todos os anos (federações surgiram em 2022): ausentes viram "".
+COLS_OPCIONAIS = {"DS_COMPOSICAO_FEDERACAO", "DS_COMPOSICAO_COLIGACAO", "SG_UF_NASCIMENTO", "DS_COR_RACA"}
+
+# Em 2006/2008 quase todo bem foi registrado como "Outros bens e direitos"; para esses tipos
+# genéricos a categoria é deduzida da descrição (texto sem acento, maiúsculo).
+TIPOS_GENERICOS = {"OUTROS BENS E DIREITOS", "OUTROS BENS MOVEIS", "OUTROS"}
+REGRAS_DESCRICAO = [
+    (4, r"EM ESPECIE"),
+    (2, r"QUOTA|COTAS? (DE|DO|DA) CAPITAL|CAPITAL SOCIAL|PARTICIPACAO|\bACOES\b|\bLTDA\b|\bEIRELI\b|\bS ?/? ?A\b|EMPRESA"),
+    (1, r"VEICULO|AUTOMOVEL|CARRO|MOTOCICLETA|\bMOTO\b|CAMINH|CAMIONETE|PICK ?UP|TRATOR|ONIBUS|AERONAVE|LANCHA|BARCO"
+        r"|EMBARCAC|\bPLACA\b|RENAVAM|\bFIAT\b|VOLKSWAGEN|\bVW\b|CHEVROLET|\bFORD\b|HONDA|TOYOTA|RENAULT|HYUNDAI|YAMAHA"),
+    (0, r"IMOVEL|CASA|APARTAMENTO|\bAPTO\b|TERRENO|\bLOTE\b|SITIO|FAZENDA|CHACARA|\bSALA\b|\bLOJA\b|GALPAO|PREDIO"
+        r"|HECTARE|ALQUEIRE|EDIFICIO|RESIDENCIA|MATRICULA|ESCRITURA|\bGLEBA\b|AREA DE TERRA|PONTO COMERCIAL"),
+    (3, r"CONTA CORRENTE|\bC ?/ ?C\b|POUPANCA|APLICAC|SALDO|DEPOSITO|\bBANCO\b|\bCDB\b|FUNDO|PREVIDENCIA|VGBL|PGBL"
+        r"|TITULO|CREDITO|EMPRESTIMO|CONSORCIO|TESOURO|INVESTIMENTO"),
+]
 
 # Categorias de bens exibidas no site (a ordem precisa bater com site/app.js).
 CATEGORIAS = ["Imóveis", "Veículos", "Empresas e ações", "Aplicações e contas", "Dinheiro em espécie", "Outros"]
@@ -127,8 +143,10 @@ def ler_csv(caminho, colunas):
                 ))
     df = pd.concat(partes, ignore_index=True)
     faltando = set(colunas) - set(df.columns)
-    if faltando:
-        raise SystemExit(f"{caminho}: colunas ausentes {sorted(faltando)}")
+    for c in faltando & COLS_OPCIONAIS:
+        df[c] = ""
+    if faltando - COLS_OPCIONAIS:
+        raise SystemExit(f"{caminho}: colunas ausentes {sorted(faltando - COLS_OPCIONAIS)}")
     for c in colunas:
         s = df[c].str.strip()
         df[c] = s.where(~s.isin(NULOS), "")
@@ -150,6 +168,24 @@ def categoria_bem(tipo):
     return len(CATEGORIAS) - 1
 
 
+def classificar_por_descricao(df, genericos):
+    """Reclassifica, pela descrição, itens cujo tipo é genérico ("Outros bens e direitos")."""
+    alvo = df["DS_TIPO_BEM_CANDIDATO"].isin(genericos)
+    if not alvo.any():
+        return 0
+    desc = (df.loc[alvo, "DS_BEM_CANDIDATO"].str.normalize("NFKD")
+            .str.encode("ascii", "ignore").str.decode("ascii").str.upper()
+            .str.replace(r"[^A-Z0-9/ ]+", " ", regex=True))
+    nova = pd.Series(len(CATEGORIAS) - 1, index=desc.index)
+    pendente = pd.Series(True, index=desc.index)
+    for cat, rx in REGRAS_DESCRICAO:
+        casou = pendente & desc.str.contains(rx, regex=True)
+        nova[casou] = cat
+        pendente &= ~casou
+    df.loc[alvo, "cat"] = nova
+    return int((~pendente).sum())
+
+
 def carregar_bens(raw, anos):
     """Por ano: DataFrame indexado por 'SG_UE|SQ_CANDIDATO' com colunas total, c0..c5 (categorias)."""
     bens = {}
@@ -162,6 +198,8 @@ def carregar_bens(raw, anos):
         df["v"] = para_reais(df["VR_BEM_CANDIDATO"])
         cats = {t: categoria_bem(t) for t in pd.unique(df["DS_TIPO_BEM_CANDIDATO"])}
         df["cat"] = df["DS_TIPO_BEM_CANDIDATO"].map(cats)
+        genericos = {t for t in cats if normaliza(t) in TIPOS_GENERICOS}
+        reclass = classificar_por_descricao(df, genericos)
         chave = df["SG_UE"] + "|" + df["SQ_CANDIDATO"]
         tabela = df.pivot_table(index=chave, columns="cat", values="v", aggfunc="sum", fill_value=0.0)
         tabela = tabela.reindex(columns=range(len(CATEGORIAS)), fill_value=0.0)
@@ -170,7 +208,7 @@ def carregar_bens(raw, anos):
         bens[ano] = tabela
         por_cat = df.groupby("cat")["v"].sum() / max(df["v"].sum(), 1)
         partes = ", ".join(f"{CATEGORIAS[i]} {por_cat.get(i, 0):.0%}" for i in range(len(CATEGORIAS)))
-        log(f"bens {ano}: {len(df):,} itens, {len(tabela):,} candidaturas | {partes}")
+        log(f"bens {ano}: {len(df):,} itens, {len(tabela):,} candidaturas | {partes} | {reclass:,} reclassificados pela descrição")
         o = df[df["cat"] == len(CATEGORIAS) - 1].groupby("DS_TIPO_BEM_CANDIDATO")["v"].sum()
         outros = outros.add(o, fill_value=0)
     if len(outros):
