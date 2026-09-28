@@ -7,6 +7,10 @@ on:
         description: "Restringir a alguns anos (ex.: 2022,2024). Vazio = todos"
         required: false
         default: ""
+      publicar:
+        description: "Publicar no GitHub Pages ao final (desmarque para só testar o processamento)"
+        type: boolean
+        default: true
   push:
     branches: [main]
     paths:
@@ -66,6 +70,7 @@ jobs:
 
   deploy:
     needs: build
+    if: github.event_name != 'workflow_dispatch' || inputs.publicar
     runs-on: ubuntu-latest
     environment:
       name: github-pages

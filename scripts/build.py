@@ -22,6 +22,7 @@ import re
 import shutil
 import time
 import unicodedata
+import urllib.request
 import zipfile
 
 import numpy as np
@@ -54,8 +55,23 @@ COLS_CAND = [
     "NM_URNA_CANDIDATO", "NR_CPF_CANDIDATO", "DS_SITUACAO_CANDIDATURA",
     "SG_PARTIDO", "NM_PARTIDO", "DT_NASCIMENTO", "NR_TITULO_ELEITORAL_CANDIDATO",
     "DS_OCUPACAO", "DS_SIT_TOT_TURNO",
+    "DS_GENERO", "DS_GRAU_INSTRUCAO", "DS_COR_RACA", "SG_UF_NASCIMENTO",
+    "DS_COMPOSICAO_COLIGACAO", "DS_COMPOSICAO_FEDERACAO",
 ]
-COLS_BENS = ["SG_UE", "SQ_CANDIDATO", "VR_BEM_CANDIDATO"]
+COLS_BENS = ["SG_UE", "SQ_CANDIDATO", "VR_BEM_CANDIDATO", "DS_TIPO_BEM_CANDIDATO"]
+
+# Categorias de bens exibidas no site (a ordem precisa bater com site/app.js).
+CATEGORIAS = ["Imóveis", "Veículos", "Empresas e ações", "Aplicações e contas", "Dinheiro em espécie", "Outros"]
+REGRAS_CATEGORIA = [  # (índice da categoria, regex sobre o tipo normalizado) — a primeira que casar vence
+    (4, r"ESPECIE"),
+    (2, r"QUOTA|QUINH|\bACOES\b|\bACAO\b|PARTICIPAC.*SOCIET|EMPRESA|CAPITAL SOCIAL|FIRMA INDIVIDUAL"),
+    (1, r"VEICULO|AERONAVE|EMBARCAC|BARCO|LANCHA|NAVIO|MOTOCICL|CAMINH|AUTOMOVEL|TRATOR|ONIBUS"),
+    (0, r"IMOVEL|IMOVEIS|CASA|APARTAMENTO|TERRENO|\bSALA\b|\bLOJA\b|PREDIO|GALPAO|CONSTRUC|BENFEITORIA"
+        r"|FAZENDA|SITIO|CHACARA|TERRA NUA|GLEBA|RURAL|EDIFIC|HANGAR|GARAGEM|\bBOX\b|\bLOTE\b|RESIDENCIA"),
+    (3, r"DEPOSITO|CONTA|POUPANCA|APLICAC|RENDA FIXA|RENDA VARIAVEL|FUNDO|TITULO|CREDITO|PREVIDENCIA|VGBL"
+        r"|PGBL|CRIPTO|OURO|MOEDA|DEBENTURE|\bLCI\b|\bLCA\b|\bCDB\b|\bRDB\b|TESOURO|INVESTIMENTO|CONSORCIO"
+        r"|EMPRESTIMO|ATIVO"),
+]
 
 
 def log(*a):
@@ -126,16 +142,41 @@ def para_reais(s):
     return pd.to_numeric(conv, errors="coerce").fillna(0.0)
 
 
+def categoria_bem(tipo):
+    n = normaliza(tipo)
+    for cat, rx in REGRAS_CATEGORIA:
+        if re.search(rx, n):
+            return cat
+    return len(CATEGORIAS) - 1
+
+
 def carregar_bens(raw, anos):
+    """Por ano: DataFrame indexado por 'SG_UE|SQ_CANDIDATO' com colunas total, c0..c5 (categorias)."""
     bens = {}
+    outros = pd.Series(dtype=float)
     for caminho in sorted(glob.glob(os.path.join(raw, "bem_candidato_*.zip"))):
         ano = ano_do_arquivo(caminho)
         if anos and ano not in anos:
             continue
         df = ler_csv(caminho, COLS_BENS)
         df["v"] = para_reais(df["VR_BEM_CANDIDATO"])
-        bens[ano] = df.groupby(df["SG_UE"] + "|" + df["SQ_CANDIDATO"])["v"].sum()
-        log(f"bens {ano}: {len(df):,} itens, {len(bens[ano]):,} candidaturas")
+        cats = {t: categoria_bem(t) for t in pd.unique(df["DS_TIPO_BEM_CANDIDATO"])}
+        df["cat"] = df["DS_TIPO_BEM_CANDIDATO"].map(cats)
+        chave = df["SG_UE"] + "|" + df["SQ_CANDIDATO"]
+        tabela = df.pivot_table(index=chave, columns="cat", values="v", aggfunc="sum", fill_value=0.0)
+        tabela = tabela.reindex(columns=range(len(CATEGORIAS)), fill_value=0.0)
+        tabela.columns = [f"c{i}" for i in tabela.columns]
+        tabela["total"] = tabela.sum(axis=1)
+        bens[ano] = tabela
+        por_cat = df.groupby("cat")["v"].sum() / max(df["v"].sum(), 1)
+        partes = ", ".join(f"{CATEGORIAS[i]} {por_cat.get(i, 0):.0%}" for i in range(len(CATEGORIAS)))
+        log(f"bens {ano}: {len(df):,} itens, {len(tabela):,} candidaturas | {partes}")
+        o = df[df["cat"] == len(CATEGORIAS) - 1].groupby("DS_TIPO_BEM_CANDIDATO")["v"].sum()
+        outros = outros.add(o, fill_value=0)
+    if len(outros):
+        log("tipos classificados como 'Outros' (maiores valores):")
+        for t, v in outros.sort_values(ascending=False).head(25).items():
+            log(f"    R$ {v:>18,.0f}  {t}")
     return bens
 
 
@@ -188,13 +229,31 @@ def carregar_candidaturas(raw, anos, bens, tab):
         herdados = completar_resultados(df, ano, correcoes)
         suplementar = df["NM_TIPO_ELEICAO"].str.upper().str.contains("SUPLEMENTAR")
         eleicao = df["DS_ELEICAO"].where(suplementar, "")
+        n_cat = len(CATEGORIAS)
         if ano in bens:
-            valor = (df["SG_UE"] + "|" + df["SQ_CANDIDATO"]).map(bens[ano]).fillna(0.0).to_numpy()
+            b = bens[ano].reindex(df["SG_UE"] + "|" + df["SQ_CANDIDATO"]).fillna(0.0)
+            valor = b["total"].to_numpy()
+            por_cat = [b[f"c{i}"].to_numpy() for i in range(n_cat)]
             com_bens = (valor > 0).mean()
         else:
             valor = np.full(len(df), np.nan)
+            por_cat = [np.zeros(len(df)) for _ in range(n_cat)]
             com_bens = None
+        # Coligação/federação: só para cargos majoritários (titulares) e deputados, para
+        # não multiplicar o tamanho com as milhares de coligações municipais de vereador.
+        cargo_norm = df["DS_CARGO"].map(normaliza)
+        com_colig = ~cargo_norm.isin(["VEREADOR", *TITULAR_DA_CHAPA])
+        composicao = df["DS_COMPOSICAO_COLIGACAO"].where(df["DS_COMPOSICAO_COLIGACAO"] != "",
+                                                         df["DS_COMPOSICAO_FEDERACAO"])
+        composicao = composicao.where(com_colig & composicao.str.contains("/", regex=False), "")
+        extras = {f"b{i}": por_cat[i] for i in range(n_cat)}
         blocos.append(pd.DataFrame({
+            **extras,
+            "genero": tab["genero"].codifica(df["DS_GENERO"]),
+            "instrucao": tab["instrucao"].codifica(df["DS_GRAU_INSTRUCAO"]),
+            "cor": tab["cor"].codifica(df["DS_COR_RACA"]),
+            "uf_nasc": df["SG_UF_NASCIMENTO"].to_numpy(),
+            "coligacao": composicao.str.replace(r"\s*/\s*", " / ", regex=True).to_numpy(),
             "ano": np.full(len(df), ano, np.int16),
             "eleicao": tab["eleicao"].codifica(eleicao),
             "cargo": tab["cargo"].codifica(df["DS_CARGO"]),
@@ -288,6 +347,45 @@ def montar_chapas(df, tab):
     return chapas
 
 
+def percentis_eleitos(df, foi_eleito):
+    """Percentis 0..100 do patrimônio declarado dos eleitos, por ano e cargo ("ano|código do cargo").
+
+    Usado no site para frases como "maior que o de 92% dos deputados federais eleitos em 2022".
+    """
+    el = foi_eleito[df["resultado"].to_numpy()] & ~np.isnan(df["bens"].to_numpy())
+    sub = df.loc[el, ["ano", "cargo", "bens"]]
+    out = {}
+    for (ano, cargo), g in sub.groupby(["ano", "cargo"]):
+        if len(g) >= 20:
+            out[f"{ano}|{cargo}"] = [int(round(x)) for x in np.percentile(g["bens"].to_numpy(), range(101))]
+    log(f"percentis de patrimônio: {len(out)} grupos ano/cargo")
+    return out
+
+
+def carregar_ipca():
+    """Número-índice do IPCA (IBGE/SIDRA) de outubro de cada ano + o mês mais recente.
+
+    Tenta a API do IBGE; se falhar, usa scripts/ipca.json (cópia versionada).
+    """
+    reserva = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ipca.json")
+    try:
+        url = "https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/2266/p/all?formato=json"
+        with urllib.request.urlopen(url, timeout=60) as r:
+            linhas = json.load(r)[1:]
+        indices = {x["D3C"]: float(x["V"]) for x in linhas if re.fullmatch(r"[0-9.]+", x["V"])}
+        log(f"IPCA: {len(indices)} meses via API do IBGE")
+    except Exception as e:  # noqa: BLE001 — qualquer falha de rede cai na cópia local
+        with open(reserva, encoding="utf-8") as f:
+            indices = json.load(f)["indices"]
+        log(f"IPCA: API indisponível ({e}); usando cópia local com {len(indices)} meses")
+    ultimo = max(indices)
+    return {
+        "outubro": {k[:4]: v for k, v in indices.items() if k.endswith("10") and k >= "1994"},
+        "ref_mes": ultimo,
+        "ref_indice": indices[ultimo],
+    }
+
+
 def chaves_busca(nome_norm, urnas_norm):
     ks = set()
     t = tokens(nome_norm)
@@ -319,9 +417,11 @@ def gerar(df, rot, nome_norm, tab, out):
     os.makedirs(os.path.join(out, "p"))
     os.makedirs(os.path.join(out, "idx"))
 
+    n_cat = len(CATEGORIAS)
     col = {c: df[c].to_numpy() for c in
            ["pid", "ano", "eleicao", "cargo", "ue", "partido", "situacao", "resultado",
-            "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask"]}
+            "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask",
+            "genero", "instrucao", "cor", "uf_nasc", "coligacao", *[f"b{i}" for i in range(n_cat)]]}
     inicios = np.flatnonzero(np.r_[True, col["pid"][1:] != col["pid"][:-1]])
     fins = np.r_[inicios[1:], len(df)]
 
@@ -349,17 +449,27 @@ def gerar(df, rot, nome_norm, tab, out):
         cands = []
         for i in range(a, b):
             v = col["bens"][i]
+            tem_bens = not np.isnan(v) and v > 0
+            # Posições (site/app.js): 0 ano, 1 cargo, 2 local, 3 partido, 4 situação, 5 resultado,
+            # 6 bens (total), 7 eleição suplementar, 8 chapa, 9 bens por categoria, 10 ocupação, 11 coligação.
             cand = [
                 int(col["ano"][i]), int(col["cargo"][i]), int(col["ue"][i]), int(col["partido"][i]),
                 int(col["situacao"][i]), int(col["resultado"][i]),
                 None if np.isnan(v) else int(round(v)), int(col["eleicao"][i]),
+                chapas.get(i),
+                [int(round(col[f"b{k}"][i])) for k in range(n_cat)] if tem_bens else None,
+                int(col["ocupacao"][i]),
+                col["coligacao"][i],
             ]
-            if i in chapas:
-                cand.append(chapas[i])
+            while len(cand) > 8 and cand[-1] in (None, "", 0):  # corta campos finais vazios
+                cand.pop()
             cands.append(cand)
         # CPF mascarado da candidatura mais recente que o tenha (em 2024 o TSE não divulgou CPF)
         cpf_mask = next((c for c in col["cpf_mask"][a:b][::-1] if c), None)
-        lote.append([col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands, cpf_mask])
+        perfil = [
+            next((int(x) for x in col[c][a:b][::-1] if x), 0) for c in ("genero", "instrucao", "cor")
+        ] + [next((x for x in col["uf_nasc"][a:b][::-1] if x), "")]
+        lote.append([col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands, cpf_mask, perfil])
 
         urnas_norm = {normaliza(u) for u in urnas}
         for k in chaves_busca(col["nome_norm"][b - 1], urnas_norm):
@@ -399,6 +509,9 @@ def gerar(df, rot, nome_norm, tab, out):
         "n_buckets": N_BUCKETS,
         "por_arquivo": PESSOAS_POR_ARQUIVO,
         "tabelas": {k: t.itens for k, t in tab.items()},
+        "categorias_bens": CATEGORIAS,
+        "percentis": percentis_eleitos(df, foi_eleito),
+        "ipca": carregar_ipca(),
     }
     with open(os.path.join(out, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, separators=(",", ":"))
@@ -413,7 +526,8 @@ def main():
     args = ap.parse_args()
     anos = {int(a) for a in args.anos.split(",") if a.strip()}
 
-    tab = {k: Tabela() for k in ["eleicao", "cargo", "ue", "partido", "situacao", "resultado", "ocupacao"]}
+    tab = {k: Tabela() for k in ["eleicao", "cargo", "ue", "partido", "situacao", "resultado", "ocupacao",
+                                 "genero", "instrucao", "cor"]}
     bens = carregar_bens(args.raw, anos)
     df = carregar_candidaturas(args.raw, anos, bens, tab)
     del bens
