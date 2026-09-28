@@ -77,8 +77,8 @@ async function localizar(tk) {
 
 async function pessoa(pid) {
   const lote = await getJson(`data/p/${Math.floor(pid / META.por_arquivo)}.json`);
-  const [nome, urnas, anoNasc, ocupacao, cands] = lote[pid % META.por_arquivo];
-  return { pid, nome, urnas, anoNasc, ocupacao: META.tabelas.ocupacao[ocupacao], cands: cands.map(candidatura) };
+  const [nome, urnas, anoNasc, ocupacao, cands, cpf] = lote[pid % META.por_arquivo];
+  return { pid, nome, urnas, anoNasc, cpf, ocupacao: META.tabelas.ocupacao[ocupacao], cands: cands.map(candidatura) };
 }
 
 function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao]) {
@@ -165,7 +165,7 @@ function cartao(p) {
   return `<button class="cartao" data-pid="${p.pid}">
     <h3>${esc(cap(p.nome))}${selo}</h3>
     <div class="linha">${p.cands.length} candidatura${p.cands.length > 1 ? "s" : ""} (${periodo})${urna}</div>
-    <div class="linha">${esc(r.ufs.join(", ") || "Brasil")} · ${esc(partidos)}${p.anoNasc ? ` · nasc. ${p.anoNasc}` : ""}</div>
+    <div class="linha">${esc(r.ufs.join(", ") || "Brasil")} · ${esc(partidos)}${p.anoNasc ? ` · nasc. ${p.anoNasc}` : ""}${p.cpf ? ` · CPF ${esc(p.cpf)}` : ""}</div>
   </button>`;
 }
 
@@ -185,7 +185,7 @@ async function mostrarFicha(pid, unica = false) {
     <div class="ficha-topo">
       <h2>${esc(cap(p.nome))}</h2>
       <div class="linha">${p.urnas.length ? `Nome de urna: ${p.urnas.map((u) => `“${esc(u)}”`).join(", ")}` : ""}
-        ${p.anoNasc ? ` · nascimento: ${p.anoNasc}` : ""}${p.ocupacao ? ` · ocupação declarada: ${esc(cap(p.ocupacao))}` : ""}</div>
+        ${p.anoNasc ? ` · nascimento: ${p.anoNasc}` : ""}${p.cpf ? ` · CPF: ${esc(p.cpf)}` : ""}${p.ocupacao ? ` · ocupação declarada: ${esc(cap(p.ocupacao))}` : ""}</div>
     </div>
 
     <div class="resumo">

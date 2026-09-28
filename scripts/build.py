@@ -10,8 +10,9 @@ Saída (pasta --out):
   - idx/XXX.json       índice de busca: chave de nome -> lista de ids de pessoa
   - p/N.json           fichas das pessoas (256 por arquivo)
 
-O CPF e o título de eleitor são usados apenas para juntar as candidaturas
-da mesma pessoa e NÃO são gravados na saída.
+O CPF e o título de eleitor são usados para juntar as candidaturas da mesma
+pessoa. Na saída pública o CPF aparece só MASCARADO (***.456.789-**, padrão do
+Portal da Transparência) e o título de eleitor não aparece.
 """
 import argparse
 import glob
@@ -212,6 +213,16 @@ def carregar_candidaturas(raw, anos, bens, tab):
     return pd.concat(blocos, ignore_index=True)
 
 
+def cpf_valido(cpf):
+    return cpf.str.fullmatch(r"\d{11}") & ~cpf.str.fullmatch(r"(\d)\1{10}")
+
+
+def mascarar_cpf(cpf):
+    """'12345678901' -> '***.456.789-**' (padrão do Portal da Transparência)."""
+    mask = "***." + cpf.str[3:6] + "." + cpf.str[6:9] + "-**"
+    return mask.where(cpf_valido(cpf), "")
+
+
 def agrupar_pessoas(df):
     """Junta candidaturas da mesma pessoa por CPF, título de eleitor ou nome+nascimento."""
     n = len(df)
@@ -219,7 +230,7 @@ def agrupar_pessoas(df):
     nome_norm = df["nome"].map(cache)
     cpf, nasc = df["cpf"], df["nasc"]
     titulo = df["titulo"].str.lstrip("0")
-    ok_cpf = cpf.str.fullmatch(r"\d{11}") & ~cpf.str.fullmatch(r"(\d)\1{10}")
+    ok_cpf = cpf_valido(cpf)
     ok_tit = titulo.str.fullmatch(r"\d{6,12}")
     ok_nasc = nasc.str.fullmatch(r"\d{2}/\d{2}/(19\d{2}|20[01]\d)") & (nome_norm.str.len() > 0)
     chaves = pd.concat([
@@ -275,7 +286,7 @@ def gerar(df, rot, nome_norm, tab, out):
 
     col = {c: df[c].to_numpy() for c in
            ["pid", "ano", "eleicao", "cargo", "ue", "partido", "situacao", "resultado",
-            "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm"]}
+            "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask"]}
     inicios = np.flatnonzero(np.r_[True, col["pid"][1:] != col["pid"][:-1]])
     fins = np.r_[inicios[1:], len(df)]
 
@@ -306,7 +317,9 @@ def gerar(df, rot, nome_norm, tab, out):
                 int(col["situacao"][i]), int(col["resultado"][i]),
                 None if np.isnan(v) else int(round(v)), int(col["eleicao"][i]),
             ])
-        lote.append([col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands])
+        # CPF mascarado da candidatura mais recente que o tenha (em 2024 o TSE não divulgou CPF)
+        cpf_mask = next((c for c in col["cpf_mask"][a:b][::-1] if c), None)
+        lote.append([col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands, cpf_mask])
 
         urnas_norm = {normaliza(u) for u in urnas}
         for k in chaves_busca(col["nome_norm"][b - 1], urnas_norm):
@@ -365,7 +378,8 @@ def main():
     df = carregar_candidaturas(args.raw, anos, bens, tab)
     del bens
     rot, nome_norm = agrupar_pessoas(df)
-    df = df.drop(columns=["cpf", "titulo"])
+    df["cpf_mask"] = mascarar_cpf(df["cpf"])
+    df = df.drop(columns=["cpf", "titulo"])  # CPF completo e título não saem daqui
     gerar(df, rot, nome_norm, tab, args.out)
 
 

@@ -38,10 +38,16 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Baixar dados brutos do TSE (release dados-tse)
+      # Os zips do TSE (com CPF completo) ficam no repositório PRIVADO raio-x-politico-dados.
+      # DADOS_TOKEN: fine-grained token com permissão "Contents: read" só naquele repositório.
+      - name: Baixar dados brutos do TSE (repositório privado)
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download dados-tse --dir raw --pattern "*.zip"
+          GH_TOKEN: ${{ secrets.DADOS_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Secret DADOS_TOKEN não configurado (veja o README)."; exit 1
+          fi
+          gh release download dados-tse -R FernandoCunhaJunior/raio-x-politico-dados --dir raw --pattern "*.zip"
 
       - name: Processar
         run: python scripts/build.py --raw raw --out site/data --anos "${{ inputs.anos }}"
