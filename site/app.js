@@ -277,10 +277,17 @@ async function mostrarFicha(pid, unica = false) {
 
 function chapaHtml(c) {
   if (!c.chapa.length) return `<span class="muted">—</span>`;
-  return `<div class="chapa">${c.chapa.map((m) => {
+  // A mesma pessoa pode ter dois papéis na chapa (ex.: vice que substituiu o titular).
+  const porPessoa = new Map();
+  for (const m of c.chapa) {
     const papel = TITULARES.has(normaliza(m.cargo)) ? "Titular" : cap(m.cargo);
-    return `<div><span>${esc(papel)}:</span> <a href="${linkPessoa(m.pid, m.nome)}">${esc(cap(m.nome))}</a></div>`;
-  }).join("")}</div>`;
+    const atual = porPessoa.get(m.pid);
+    if (atual) { if (!atual.papeis.includes(papel)) atual.papeis.push(papel); }
+    else porPessoa.set(m.pid, { ...m, papeis: [papel] });
+  }
+  return `<div class="chapa">${[...porPessoa.values()].map((m) =>
+    `<div><span>${esc(m.papeis.join(" / "))}:</span> <a href="${linkPessoa(m.pid, m.nome)}">${esc(cap(m.nome))}</a></div>`
+  ).join("")}</div>`;
 }
 
 function linhaCand(c) {

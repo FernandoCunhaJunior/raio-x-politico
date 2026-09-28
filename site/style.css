@@ -66,6 +66,8 @@ a { color: var(--link); }
     linear-gradient(160deg, #323236 0%, var(--grafite) 45%, #1b1b1e 100%);
 }
 .fita { position: absolute; right: -40px; top: 0; height: 100%; width: min(640px, 70%); opacity: .9; pointer-events: none; }
+/* Em telas médias a fita invadiria o texto: fica só como textura. */
+@media (max-width: 1100px) { .fita { opacity: .18; } }
 .hero-inner { position: relative; padding: 44px 16px 36px; }
 .sobretitulo { margin: 0; text-transform: uppercase; letter-spacing: .14em; font-size: .78rem; color: #c9c7c4; font-weight: 600; }
 .hero h1 { margin: 6px 0 8px; font-size: clamp(2.1rem, 5vw, 3.2rem); line-height: 1.05; letter-spacing: -.02em; font-weight: 800; }
@@ -211,7 +213,7 @@ tbody tr:hover { background: var(--surface-2); }
   .barra-inner { height: 60px; }
   .produto { font-size: .9rem; }
   .hero-inner { padding-top: 32px; }
-  .fita { opacity: .35; width: 100%; right: -30%; }
+  .fita { opacity: .15; width: 100%; right: -30%; }
   .busca button { padding: 0 16px; }
   .numeros dd { font-size: 1.35rem; }
   .ficha-topo { flex-direction: column; align-items: flex-start; }
