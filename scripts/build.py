@@ -314,6 +314,97 @@ def carregar_candidaturas(raw, anos, bens, tab):
     return pd.concat(blocos, ignore_index=True)
 
 
+CADASTROS_CGU = ["ceis", "cnep", "ceaf"]
+
+
+def baixar_cgu(destino):
+    """Baixa CEIS, CNEP e CEAF do Portal da Transparência (arquivo do dia ou dos dias anteriores).
+
+    Retorna {cadastro: (caminho_zip, 'AAAAMMDD')}. Falhas não interrompem o build.
+    """
+    os.makedirs(destino, exist_ok=True)
+    ua = {"User-Agent": "Mozilla/5.0 (raio-x-politico; +https://github.com/FernandoCunhaJunior/raio-x-politico)"}
+    hoje = pd.Timestamp.now(tz="America/Bahia").normalize()
+    out = {}
+    for cad in CADASTROS_CGU:
+        for d in range(8):
+            data = (hoje - pd.Timedelta(days=d)).strftime("%Y%m%d")
+            url = f"https://portaldatransparencia.gov.br/download-de-dados/{cad}/{data}"
+            caminho = os.path.join(destino, f"{cad}_{data}.zip")
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=ua), timeout=120) as r:
+                    conteudo = r.read()
+                if conteudo[:2] != b"PK":
+                    continue
+                with open(caminho, "wb") as f:
+                    f.write(conteudo)
+                out[cad] = (caminho, data)
+                break
+            except Exception:  # noqa: BLE001 — tenta o dia anterior
+                continue
+        log(f"CGU {cad.upper()}: " + (f"arquivo de {out[cad][1]}" if cad in out else "NÃO DISPONÍVEL (seguindo sem)"))
+    return out
+
+
+def resumo_fundamentacao(txt):
+    """'LEI 8429 - ART. 12 - INDEPENDENTEMENTE...' -> 'Lei 8429, art. 12' (+ 'e outras')."""
+    partes = [p for p in (txt or "").split(";") if p.strip()]
+    if not partes:
+        return ""
+    seg = [s.strip() for s in partes[0].split(" - ")][:2]
+    r = ", ".join(seg).replace("LEI ", "Lei ").replace("ART.", "art.")
+    return r + (" e outras" if len(partes) > 1 else "")
+
+
+def carregar_sancoes(arquivos):
+    """Lê as sanções de pessoas físicas da CGU.
+
+    Retorna (registros, por_cpf, por_mascara): registros é a lista publicada no site;
+    por_cpf mapeia CPF completo -> índices; por_mascara mapeia 'dígitos visíveis|nome' -> índices.
+    """
+    registros, por_cpf, por_mascara = [], {}, {}
+    for cad, (caminho, _) in arquivos.items():
+        with zipfile.ZipFile(caminho) as z:
+            nome_csv = next(n for n in z.namelist() if n.lower().endswith(".csv"))
+            with z.open(nome_csv) as f:
+                s = pd.read_csv(f, sep=";", encoding="latin-1", dtype=str, keep_default_na=False)
+        s.columns = [normaliza(c) for c in s.columns]
+        s = s[s["TIPO DE PESSOA"] == "F"]
+        for d in s.to_dict("records"):
+            doc = d.get("CPF OU CNPJ DO SANCIONADO", "")
+            nome = normaliza(d.get("NOME DO SANCIONADO", ""))
+            digitos = re.sub(r"\D", "", doc)
+            i = len(registros)
+            registros.append([
+                cad.upper(), d.get("CATEGORIA DA SANCAO", ""), d.get("DATA INICIO SANCAO", ""),
+                d.get("DATA FINAL SANCAO", ""), d.get("ORGAO SANCIONADOR", ""), d.get("UF ORGAO SANCIONADOR", ""),
+                d.get("NUMERO DO PROCESSO", ""), resumo_fundamentacao(d.get("FUNDAMENTACAO LEGAL", "")),
+                d.get("CODIGO DA SANCAO", ""), d.get("DATA DO TRANSITO EM JULGADO", ""),
+            ])
+            if len(digitos) == 11:
+                por_cpf.setdefault(digitos, []).append((i, nome))
+            elif re.fullmatch(r"\*{3}\.\d{3}\.\d{3}-\*{2}", doc) and nome:
+                por_mascara.setdefault(f"{digitos}|{nome}", []).append(i)
+        log(f"sanções {cad.upper()}: {len(s):,} registros de pessoa física")
+    return registros, por_cpf, por_mascara
+
+
+def cruzar_sancoes(df, nome_norm, sancoes):
+    """Liga sanções às candidaturas: CPF completo (+ mesmo primeiro nome) ou CPF parcial + nome idêntico."""
+    registros, por_cpf, por_mascara = sancoes
+    cpf = df["cpf"].to_numpy()
+    ok = cpf_valido(df["cpf"]).to_numpy()
+    nomes = nome_norm.to_numpy()
+    achados = {}
+    for i in np.flatnonzero(ok):
+        c, nome = cpf[i], nomes[i]
+        idx = [j for j, n in por_cpf.get(c, []) if n.split(" ")[:1] == nome.split(" ")[:1]]
+        idx += por_mascara.get(f"{c[3:9]}|{nome}", [])
+        if idx:
+            achados[i] = idx
+    return achados
+
+
 def cpf_valido(cpf):
     return cpf.str.fullmatch(r"\d{11}") & ~cpf.str.fullmatch(r"(\d)\1{10}")
 
@@ -437,7 +528,7 @@ def chaves_busca(nome_norm, urnas_norm):
     return ks
 
 
-def gerar(df, rot, nome_norm, tab, out):
+def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
     df["pessoa"] = rot
     df["nome_norm"] = nome_norm.to_numpy()
     df = df.sort_values(["pessoa", "ano"], kind="stable")
@@ -459,7 +550,8 @@ def gerar(df, rot, nome_norm, tab, out):
     col = {c: df[c].to_numpy() for c in
            ["pid", "ano", "eleicao", "cargo", "ue", "partido", "situacao", "resultado",
             "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask",
-            "genero", "instrucao", "cor", "uf_nasc", "coligacao", *[f"b{i}" for i in range(n_cat)]]}
+            "genero", "instrucao", "cor", "uf_nasc", "coligacao", "sanc", *[f"b{i}" for i in range(n_cat)]]}
+    com_sancao = 0
     inicios = np.flatnonzero(np.r_[True, col["pid"][1:] != col["pid"][:-1]])
     fins = np.r_[inicios[1:], len(df)]
 
@@ -507,7 +599,12 @@ def gerar(df, rot, nome_norm, tab, out):
         perfil = [
             next((int(x) for x in col[c][a:b][::-1] if x), 0) for c in ("genero", "instrucao", "cor")
         ] + [next((x for x in col["uf_nasc"][a:b][::-1] if x), "")]
-        lote.append([col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands, cpf_mask, perfil])
+        pessoa = [col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands, cpf_mask, perfil]
+        ids_sanc = sorted({j for x in col["sanc"][a:b] if isinstance(x, list) for j in x})
+        if ids_sanc:
+            pessoa.append([registros_sancoes[j] for j in ids_sanc])
+            com_sancao += 1
+        lote.append(pessoa)
 
         urnas_norm = {normaliza(u) for u in urnas}
         for k in chaves_busca(col["nome_norm"][b - 1], urnas_norm):
@@ -529,6 +626,7 @@ def gerar(df, rot, nome_norm, tab, out):
         if pid and pid % 500_000 == 0:
             log(f"  {pid:,} pessoas gravadas")
 
+    log(f"pessoas com registro em cadastro de sanções da CGU: {com_sancao:,}")
     for i, balde in enumerate(buckets):
         for k, lista in balde.items():
             if isinstance(lista, list) and len(lista) > 1:
@@ -550,6 +648,7 @@ def gerar(df, rot, nome_norm, tab, out):
         "categorias_bens": CATEGORIAS,
         "percentis": percentis_eleitos(df, foi_eleito),
         "ipca": carregar_ipca(),
+        "sancoes_fontes": fontes_sancoes,  # {"CEIS": "AAAAMMDD", ...}
     }
     with open(os.path.join(out, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, separators=(",", ":"))
@@ -570,9 +669,15 @@ def main():
     df = carregar_candidaturas(args.raw, anos, bens, tab)
     del bens
     rot, nome_norm = agrupar_pessoas(df)
+    arquivos_cgu = baixar_cgu(os.path.join(args.raw, "cgu"))
+    sancoes = carregar_sancoes(arquivos_cgu)
+    achados = cruzar_sancoes(df, nome_norm, sancoes)
+    df["sanc"] = pd.Series(achados, dtype=object).reindex(df.index)
+    log(f"candidaturas ligadas a sanções da CGU: {len(achados):,}")
     df["cpf_mask"] = mascarar_cpf(df["cpf"])
     df = df.drop(columns=["cpf", "titulo"])  # CPF completo e título não saem daqui
-    gerar(df, rot, nome_norm, tab, args.out)
+    fontes = {cad.upper(): data for cad, (_, data) in arquivos_cgu.items()}
+    gerar(df, rot, nome_norm, tab, args.out, sancoes[0], fontes)
 
 
 if __name__ == "__main__":

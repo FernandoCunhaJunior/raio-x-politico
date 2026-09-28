@@ -79,14 +79,29 @@ async function localizar(tk) {
 
 async function pessoa(pid) {
   const lote = await getJson(`data/p/${Math.floor(pid / META.por_arquivo)}.json`);
-  const [nome, urnas, anoNasc, ocupacao, cands, cpf, perfil] = lote[pid % META.por_arquivo];
+  const [nome, urnas, anoNasc, ocupacao, cands, cpf, perfil, sancoes] = lote[pid % META.por_arquivo];
   const T = META.tabelas;
   const [genero, instrucao, cor, ufNasc] = perfil || [0, 0, 0, ""];
   return {
     pid, nome, urnas, anoNasc, cpf, ocupacao: T.ocupacao[ocupacao], cands: cands.map(candidatura),
     perfil: { genero: T.genero?.[genero], instrucao: T.instrucao?.[instrucao], cor: T.cor?.[cor], ufNasc },
+    sancoes: (sancoes || []).map(sancao),
   };
 }
+
+// Posições definidas em scripts/build.py (carregar_sancoes)
+function sancao([cadastro, categoria, inicio, fim, orgao, ufOrgao, processo, fundamentacao, codigo, transito]) {
+  const data = (s) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s || ""); return m ? new Date(+m[3], m[2] - 1, +m[1]) : null; };
+  const dFim = data(fim);
+  return { cadastro, categoria, inicio, fim, orgao, ufOrgao, processo, fundamentacao, codigo, transito,
+    vigente: !dFim || dFim >= new Date() };
+}
+
+const NOMES_CADASTRO = {
+  CEIS: "Cadastro de Empresas e Pessoas Inidôneas e Suspensas",
+  CNEP: "Cadastro Nacional de Empresas Punidas",
+  CEAF: "Cadastro de Expulsões da Administração Federal",
+};
 
 // Posições definidas em scripts/build.py (gerar)
 function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao]) {
@@ -267,7 +282,7 @@ function cartao(p, i) {
   return `<button class="cartao" data-pid="${p.pid}" style="animation-delay:${Math.min(i, 12) * 25}ms">
     <span class="avatar${r.eleicoes.length ? " eleito" : ""}" aria-hidden="true">${esc(iniciais(p.nome))}</span>
     <span class="info">
-      <h3>${esc(cap(p.nome))}${selo}</h3>
+      <h3>${esc(cap(p.nome))}${selo}${p.sancoes.length ? `<span class="selo alerta">⚠ sanção registrada</span>` : ""}</h3>
       <div class="linha">${p.cands.length} candidatura${p.cands.length > 1 ? "s" : ""} (${periodo})${urna}</div>
       <div class="linha">${esc(r.ufs.join(", ") || "Brasil")} · ${esc(partidos)}${p.anoNasc ? ` · nasc. ${p.anoNasc}` : ""}${p.cpf ? ` · CPF ${esc(p.cpf)}` : ""}</div>
     </span>
@@ -312,6 +327,7 @@ async function mostrarFicha(pid, unica = false) {
           ${r.eleicoes.length ? `<span class="selo ok">eleito(a) ${r.eleicoes.length}×</span>` : `<span class="selo neutro">nunca eleito(a)</span>`}
           ${trocas ? `<span class="selo neutro">${trocas} troca${trocas > 1 ? "s" : ""} de partido</span>` : ""}
           ${problemas.length ? `<span class="selo alerta">${problemas.length} candidatura${problemas.length > 1 ? "s" : ""} com restrição</span>` : ""}
+          ${p.sancoes.length ? `<button type="button" class="selo alerta forte" id="ir-sancoes">⚠ ${p.sancoes.length} registro${p.sancoes.length > 1 ? "s" : ""} em cadastro de sanções</button>` : ""}
         </div>
       </div>
     </div>
@@ -322,6 +338,8 @@ async function mostrarFicha(pid, unica = false) {
       <div class="kpi"><div class="rot">Último cargo em que foi eleito(a)</div><div class="val pequeno">${ultimaEleicao ? `${esc(cap(ultimaEleicao.cargo))} (${ultimaEleicao.ano})<br><span class="muted">${esc(localTexto(ultimaEleicao))}</span>` : "—"}</div></div>
       <div class="kpi"><div class="rot">Patrimônio declarado mais recente</div><div class="val pequeno">${ultimoBens ? `${brl.format(ultimoBens.bens)} <span class="muted">(${ultimoBens.ano})</span><br><span class="muted">≈ ${brl.format(real(ultimoBens.bens, ultimoBens.ano))} em ${mesRef()}</span>` : "—"}</div></div>
     </div>
+
+    ${blocoSancoes(p)}
 
     ${blocoPerfil(p)}
 
@@ -373,6 +391,8 @@ async function mostrarFicha(pid, unica = false) {
     </div>`;
   const v = $("#voltar");
   if (v) v.onclick = () => history.back();
+  const irS = $("#ir-sancoes");
+  if (irS) irS.onclick = () => $("#sancoes").scrollIntoView({ behavior: semAnimacao ? "auto" : "smooth" });
   for (const b of document.querySelectorAll(".alternar button")) {
     b.onclick = () => {
       for (const o of document.querySelectorAll(".alternar button")) o.setAttribute("aria-pressed", String(o === b));
@@ -383,6 +403,34 @@ async function mostrarFicha(pid, unica = false) {
 }
 
 const fmtPct = (x) => `${x.toLocaleString("pt-BR", { maximumFractionDigits: x < 10 ? 1 : 0 })}%`;
+
+function blocoSancoes(p) {
+  if (!p.sancoes.length) return "";
+  const fontes = META.sancoes_fontes || {};
+  const datas = [...new Set(Object.values(fontes))].map((d) => `${d.slice(6)}/${d.slice(4, 6)}/${d.slice(0, 4)}`);
+  const ord = [...p.sancoes].sort((a, b) => (b.vigente - a.vigente) || (a.inicio < b.inicio ? 1 : -1));
+  return `<div class="bloco sancoes" id="sancoes">
+    <h3>Registros em cadastros de sanções (CGU)</h3>
+    <ul class="lista-sancoes">${ord.map((s) => `<li>
+      <div class="sancao-topo">
+        <span class="cad" title="${esc(NOMES_CADASTRO[s.cadastro] || s.cadastro)}">${esc(s.cadastro)}</span>
+        <strong>${esc(s.categoria || "Sanção")}</strong>
+        <span class="selo ${s.vigente ? "alerta" : "neutro"}">${s.vigente ? "vigente" : "encerrada"}</span>
+      </div>
+      <div class="sancao-info">
+        <span><span class="muted">Órgão sancionador:</span> ${esc(s.orgao || "—")}${s.ufOrgao ? ` (${esc(s.ufOrgao)})` : ""}</span>
+        <span><span class="muted">Período:</span> ${esc(s.inicio || "—")} ${s.fim ? `a ${esc(s.fim)}` : "(sem data final)"}</span>
+        ${s.transito ? `<span><span class="muted">Trânsito em julgado:</span> ${esc(s.transito)}</span>` : ""}
+        ${s.processo ? `<span><span class="muted">Processo:</span> ${esc(s.processo)}</span>` : ""}
+        ${s.fundamentacao ? `<span><span class="muted">Fundamentação:</span> ${esc(s.fundamentacao)}</span>` : ""}
+      </div>
+      ${s.codigo ? `<a class="fonte" href="https://portaldatransparencia.gov.br/sancoes/consulta/${encodeURIComponent(s.codigo)}" target="_blank" rel="noopener">Ver no Portal da Transparência ↗</a>` : ""}
+    </li>`).join("")}</ul>
+    <p class="nota">Registros do ${Object.keys(fontes).join(", ") || "cadastro"} (Portal da Transparência/CGU${datas.length ? `, dados de ${datas.join(", ")}` : ""}),
+      localizados pelo CPF informado ao TSE — CPF completo idêntico ou, quando a fonte traz o CPF mascarado, dígitos visíveis e nome completo idênticos.
+      Confira sempre os detalhes na fonte oficial; o registro reflete a informação do órgão sancionador na data da consulta.</p>
+  </div>`;
+}
 
 function blocoPerfil(p) {
   const f = p.perfil;

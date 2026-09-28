@@ -249,6 +249,19 @@ tr.problema td:first-child { box-shadow: inset 4px 0 0 var(--vermelho); }
 td.partido-cel { white-space: normal; min-width: 90px; }
 .colig { font-size: .78rem; color: var(--muted); max-width: 220px; line-height: 1.35; margin-top: 2px; }
 
+/* Sanções */
+.selo.forte { background: var(--vermelho); color: #fff; border-color: var(--vermelho); cursor: pointer; font: inherit; font-size: .75rem; font-weight: 700; }
+.bloco.sancoes { border-color: rgba(196, 22, 28, .45); box-shadow: 0 0 0 3px rgba(196, 22, 28, .08), var(--shadow); }
+.bloco.sancoes h3 { color: var(--vermelho); }
+@media (prefers-color-scheme: dark) { .bloco.sancoes h3 { color: #ff7b80; } }
+.lista-sancoes { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.lista-sancoes li { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--surface-2); }
+.sancao-topo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sancao-topo .selo { margin: 0; }
+.cad { font-size: .72rem; font-weight: 800; letter-spacing: .06em; padding: 2px 8px; border-radius: 6px; background: var(--grafite); color: #fff; }
+.sancao-info { display: grid; gap: 2px; margin-top: 8px; font-size: .88rem; }
+.fonte { display: inline-block; margin-top: 8px; font-size: .86rem; font-weight: 600; }
+
 /* ---------- Rodapé ---------- */
 .rodape { background: var(--grafite); color: #cfcdca; margin-top: 24px; border-top: 4px solid var(--vermelho); }
 .rodape-inner { display: flex; gap: 24px; align-items: flex-start; padding-top: 28px; padding-bottom: 36px; font-size: .86rem; }
