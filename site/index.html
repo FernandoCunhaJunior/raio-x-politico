@@ -3,37 +3,110 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Raio-X Político</title>
-  <meta name="description" content="Busque um nome e veja se a pessoa já foi candidata, se foi eleita, por quais partidos e a evolução do patrimônio declarado ao TSE.">
+  <title>Raio-X Político · UNAI</title>
+  <meta name="description" content="UNAI — Unidade de Assessoramento e Investigação. Busque um nome e veja se a pessoa já foi candidata, se foi eleita, por quais partidos e a evolução do patrimônio declarado ao TSE.">
+  <meta name="theme-color" content="#2a2a2d">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232a2a2d'/%3E%3Cpath d='M10 16 L24 48 L32 30 L40 48 L54 16' fill='none' stroke='%23c4161c' stroke-width='8' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topo">
-    <div class="wrap">
-      <a href="#" class="marca" id="home">Raio-X <strong>Político</strong></a>
-      <p class="sub">Histórico de candidaturas, partidos e patrimônio declarado ao TSE</p>
-      <form id="busca" class="busca" role="search">
-        <input id="q" type="search" autocomplete="off" spellcheck="false"
-               placeholder="Digite o nome completo ou o nome de urna" aria-label="Nome">
-        <button type="submit">Buscar</button>
-      </form>
-      <p class="dica">Ex.: <a href="#q=Jair Messias Bolsonaro">Jair Messias Bolsonaro</a> · <a href="#q=Lula">Lula</a> · <a href="#q=Simone Tebet">Simone Tebet</a></p>
+  <header class="barra-marca">
+    <div class="wrap barra-inner">
+      <a href="#" class="logo" id="home" aria-label="Início">
+        <img src="assets/logo-unai.webp" width="2000" height="500" alt="UNAI — Unidade de Assessoramento e Investigação">
+      </a>
+      <span class="produto">Raio-X <strong>Político</strong></span>
     </div>
   </header>
 
-  <main class="wrap">
+  <section class="hero">
+    <svg class="fita" viewBox="0 0 640 320" aria-hidden="true" preserveAspectRatio="xMaxYMid slice">
+      <defs>
+        <linearGradient id="gFita" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0" stop-color="#e02229"/>
+          <stop offset="1" stop-color="#7d0e12"/>
+        </linearGradient>
+        <linearGradient id="gCinza" x1="0" x2="1">
+          <stop offset="0" stop-color="#8a8a8e"/>
+          <stop offset="1" stop-color="#4a4a4e"/>
+        </linearGradient>
+      </defs>
+      <path d="M60 30 L200 270 L340 50" stroke="url(#gCinza)" stroke-width="64" fill="none" stroke-linejoin="round" opacity=".35"/>
+      <path d="M250 290 L400 40 L560 290" stroke="url(#gFita)" stroke-width="64" fill="none" stroke-linejoin="round"/>
+      <circle cx="455" cy="205" r="46" fill="none" stroke="#d9d9dc" stroke-width="12" opacity=".9"/>
+      <line x1="488" y1="238" x2="530" y2="280" stroke="#d9d9dc" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+    </svg>
+    <div class="wrap hero-inner">
+      <p class="sobretitulo">Unidade de Assessoramento e Investigação</p>
+      <h1>Raio-X <span>Político</span></h1>
+      <p class="lead">Digite um nome e descubra se a pessoa já foi candidata, se foi eleita, por quais partidos passou e como evoluiu o patrimônio declarado à Justiça Eleitoral.</p>
+      <form id="busca" class="busca" role="search">
+        <label class="campo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>
+          <input id="q" type="search" autocomplete="off" spellcheck="false"
+                 placeholder="Nome completo ou nome de urna" aria-label="Nome">
+        </label>
+        <button type="submit">Investigar</button>
+      </form>
+      <p class="exemplos">Experimente:
+        <a href="#q=Luiz Inácio Lula da Silva">Lula</a>
+        <a href="#q=Jair Messias Bolsonaro">Jair Bolsonaro</a>
+        <a href="#q=Simone Tebet">Simone Tebet</a>
+        <a href="#q=Tiririca">Tiririca</a>
+      </p>
+      <dl class="numeros">
+        <div><dt>pessoas</dt><dd id="n-pessoas">—</dd></div>
+        <div><dt>candidaturas</dt><dd id="n-cands">—</dd></div>
+        <div><dt>eleições</dt><dd id="n-anos">—</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <main class="wrap conteudo">
     <div id="status" class="status" aria-live="polite"></div>
     <section id="resultados"></section>
     <section id="ficha"></section>
+
+    <section id="inicio" class="inicio">
+      <div class="recursos">
+        <article class="recurso">
+          <span class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+          <h3>Histórico de candidaturas</h3>
+          <p>Todas as eleições desde 1994: cargo disputado, município ou estado e situação da candidatura.</p>
+        </article>
+        <article class="recurso">
+          <span class="ico"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17 19 7"/></svg></span>
+          <h3>Resultados e partidos</h3>
+          <p>Quando foi eleito(a), para qual cargo, e a trajetória partidária em ordem cronológica.</p>
+        </article>
+        <article class="recurso">
+          <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span>
+          <h3>Evolução patrimonial</h3>
+          <p>Soma dos bens declarados ao TSE a cada eleição, desde 2006, com a variação no período.</p>
+        </article>
+      </div>
+      <div class="aviso">
+        <strong>Como a busca funciona.</strong> Acentos e maiúsculas não importam. Use o nome completo
+        (“Jair Messias Bolsonaro”), o primeiro nome com um sobrenome (“Jair Bolsonaro”) ou o nome de urna (“Tiririca”).
+        Homônimos são diferenciados pelo ano de nascimento e pelo CPF parcialmente mascarado.
+      </div>
+    </section>
   </main>
 
-  <footer class="wrap rodape">
-    <p>Dados: <a href="https://dadosabertos.tse.jus.br" target="_blank" rel="noopener">Portal de Dados Abertos do TSE</a>,
-      candidaturas desde 1994 e bens declarados desde 2006. <span id="meta-info"></span></p>
-    <p>As candidaturas da mesma pessoa são agrupadas automaticamente (CPF, título de eleitor ou nome + data de nascimento);
-      homônimos podem aparecer separados ou, raramente, misturados. “Eleito” reflete o resultado da eleição e não garante posse ou mandato completo.
-      Valores de bens são nominais (sem correção pela inflação), exatamente como declarados.</p>
-    <p><a href="https://github.com/FernandoCunhaJunior/raio-x-politico" target="_blank" rel="noopener">Código no GitHub</a></p>
+  <footer class="rodape">
+    <div class="wrap rodape-inner">
+      <div class="rodape-marca">
+        <img src="assets/logo-unai.webp" width="2000" height="500" alt="UNAI" loading="lazy">
+      </div>
+      <div class="rodape-texto">
+        <p><strong>UNAI — Unidade de Assessoramento e Investigação</strong></p>
+        <p>Dados: <a href="https://dadosabertos.tse.jus.br" target="_blank" rel="noopener">Portal de Dados Abertos do TSE</a>
+          — candidaturas desde 1994 e bens declarados desde 2006. <span id="meta-info"></span></p>
+        <p>As candidaturas da mesma pessoa são agrupadas automaticamente (CPF, título de eleitor ou nome + data de nascimento);
+          homônimos podem aparecer separados ou, raramente, misturados. “Eleito” reflete o resultado da eleição e não garante posse
+          ou mandato completo. Valores de bens são nominais, sem correção pela inflação. CPF exibido de forma mascarada.</p>
+      </div>
+    </div>
   </footer>
 
   <script src="app.js"></script>

@@ -46,6 +46,8 @@ TITULAR_DA_CHAPA = {  # cargo normalizado do vice/suplente -> cargo do titular
     "O SUPLENTE": "SENADOR", "O SUPLENTE SENADOR": "SENADOR",  # "1º SUPLENTE" normaliza para "O SUPLENTE"
 }
 
+TITULARES = {"PRESIDENTE", "GOVERNADOR", "PREFEITO", "SENADOR"}
+
 COLS_CAND = [
     "ANO_ELEICAO", "NM_TIPO_ELEICAO", "NR_TURNO", "CD_ELEICAO", "DS_ELEICAO",
     "SG_UF", "SG_UE", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NR_CANDIDATO", "NM_CANDIDATO",
@@ -207,6 +209,8 @@ def carregar_candidaturas(raw, anos, bens, tab):
             "cpf": df["NR_CPF_CANDIDATO"].to_numpy(),
             "titulo": df["NR_TITULO_ELEITORAL_CANDIDATO"].to_numpy(),
             "nasc": df["DT_NASCIMENTO"].to_numpy(),
+            "sg_ue": df["SG_UE"].to_numpy(),
+            "nr": df["NR_CANDIDATO"].to_numpy(),
         }))
         extra = f", {com_bens:.0%} com bens declarados" if com_bens is not None else ""
         log(f"candidaturas {ano}: {len(df):,}{extra}, {herdados:,} resultados de vice/suplente herdados do titular")
@@ -253,6 +257,37 @@ def agrupar_pessoas(df):
     return rot[:n], nome_norm
 
 
+def montar_chapas(df, tab):
+    """Companheiros de chapa de cada candidatura majoritária.
+
+    Titular (presidente, governador, prefeito, senador), vice e suplentes da mesma
+    chapa têm o mesmo número na mesma UE e eleição. Retorna {linha: [[pid, cargo, nome], ...]}.
+    Espera df ordenado e com índice 0..n-1.
+    """
+    titular_de = []
+    for c in tab["cargo"].itens:
+        n = normaliza(c)
+        titular_de.append(TITULAR_DA_CHAPA.get(n, n if n in TITULARES else ""))
+    titular = np.array(titular_de, dtype=object)[df["cargo"].to_numpy()]
+    ok = (titular != "") & (df["nr"].to_numpy() != "")
+    sub = df.loc[ok, ["ano", "eleicao", "sg_ue", "nr", "pid", "cargo", "nome"]]
+    chave = (sub["ano"].astype(str) + "|" + sub["eleicao"].astype(str) + "|" + sub["sg_ue"]
+             + "|" + sub["nr"] + "|" + titular[ok])
+    pid, cargo, nome = df["pid"].to_numpy(), df["cargo"].to_numpy(), df["nome"].to_numpy()
+    linha_df = sub.index.to_numpy()
+    chapas = {}
+    for linhas in sub.groupby(chave.to_numpy()).indices.values():
+        if not 2 <= len(linhas) <= 5:  # grupos maiores indicam número repetido/erro de cadastro
+            continue
+        idx = linha_df[linhas]
+        membros = [[int(pid[j]), int(cargo[j]), nome[j]] for j in idx]
+        for k, j in enumerate(idx):
+            outros = [m for n, m in enumerate(membros) if n != k and m[0] != membros[k][0]]
+            if outros:
+                chapas[int(j)] = outros
+    return chapas
+
+
 def chaves_busca(nome_norm, urnas_norm):
     ks = set()
     t = tokens(nome_norm)
@@ -295,6 +330,8 @@ def gerar(df, rot, nome_norm, tab, out):
     peso_cargo = np.array([PESO_CARGO.get(normaliza(c), 1) for c in tab["cargo"].itens])
     foi_eleito = np.array([bool(re.match(r"ELEITO|MEDIA$", normaliza(r))) for r in tab["resultado"].itens])
     relevancia = [0] * n_pessoas
+    chapas = montar_chapas(df, tab)
+    log(f"candidaturas com companheiros de chapa: {len(chapas):,}")
 
     buckets = [dict() for _ in range(N_BUCKETS)]
     lote = []
@@ -312,11 +349,14 @@ def gerar(df, rot, nome_norm, tab, out):
         cands = []
         for i in range(a, b):
             v = col["bens"][i]
-            cands.append([
+            cand = [
                 int(col["ano"][i]), int(col["cargo"][i]), int(col["ue"][i]), int(col["partido"][i]),
                 int(col["situacao"][i]), int(col["resultado"][i]),
                 None if np.isnan(v) else int(round(v)), int(col["eleicao"][i]),
-            ])
+            ]
+            if i in chapas:
+                cand.append(chapas[i])
+            cands.append(cand)
         # CPF mascarado da candidatura mais recente que o tenha (em 2024 o TSE não divulgou CPF)
         cpf_mask = next((c for c in col["cpf_mask"][a:b][::-1] if c), None)
         lote.append([col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands, cpf_mask])
