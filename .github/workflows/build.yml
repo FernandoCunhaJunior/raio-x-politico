@@ -49,6 +49,9 @@ jobs:
       - name: Tamanho da saída
         run: du -sh site/data site/data/* && find site/data -type f | wc -l
 
+      - name: Versionar app.js e style.css (evita cache antigo após deploy)
+        run: sed -i "s/app\.js\"/app.js?v=${GITHUB_SHA::8}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::8}\"/" site/index.html
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

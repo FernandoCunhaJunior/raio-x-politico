@@ -40,9 +40,14 @@ PESO_CARGO = {  # chaves normalizadas (sem acento/hífen)
     "DEPUTADO ESTADUAL": 4, "DEPUTADO DISTRITAL": 4, "VICE PREFEITO": 3, "VEREADOR": 2,
 }
 
+TITULAR_DA_CHAPA = {  # cargo normalizado do vice/suplente -> cargo do titular
+    "VICE PRESIDENTE": "PRESIDENTE", "VICE GOVERNADOR": "GOVERNADOR", "VICE PREFEITO": "PREFEITO",
+    "O SUPLENTE": "SENADOR", "O SUPLENTE SENADOR": "SENADOR",  # "1º SUPLENTE" normaliza para "O SUPLENTE"
+}
+
 COLS_CAND = [
     "ANO_ELEICAO", "NM_TIPO_ELEICAO", "NR_TURNO", "CD_ELEICAO", "DS_ELEICAO",
-    "SG_UF", "SG_UE", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NM_CANDIDATO",
+    "SG_UF", "SG_UE", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NR_CANDIDATO", "NM_CANDIDATO",
     "NM_URNA_CANDIDATO", "NR_CPF_CANDIDATO", "DS_SITUACAO_CANDIDATURA",
     "SG_PARTIDO", "NM_PARTIDO", "DT_NASCIMENTO", "NR_TITULO_ELEITORAL_CANDIDATO",
     "DS_OCUPACAO", "DS_SIT_TOT_TURNO",
@@ -131,7 +136,39 @@ def carregar_bens(raw, anos):
     return bens
 
 
+def carregar_correcoes():
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "correcoes.csv")
+    return pd.read_csv(caminho, sep=";", dtype=str, comment="#", keep_default_na=False)
+
+
+def completar_resultados(df, ano, correcoes):
+    """Preenche resultados que o TSE deixou em branco.
+
+    1. Correções manuais (scripts/correcoes.csv) para titulares sem resultado.
+    2. Vices e suplentes herdam o resultado do titular da chapa (mesmo número, mesma UE).
+    """
+    res = df["DS_SIT_TOT_TURNO"].copy()
+    for c in correcoes[correcoes["ano"] == str(ano)].itertuples():
+        alvo = (df["DS_CARGO"] == c.cargo) & (df["SG_UE"] == c.sg_ue) & (res == "")
+        if c.nr_candidato != "*":
+            alvo &= df["NR_CANDIDATO"] == c.nr_candidato
+        res[alvo] = c.resultado
+    cargo_norm = df["DS_CARGO"].map(normaliza)
+    titular = cargo_norm.map(TITULAR_DA_CHAPA)
+    chave = df["SG_UE"] + "|" + df["NR_CANDIDATO"] + "|"
+    titulares = res[titular.isna() & (res != "")]
+    mapa = pd.Series(titulares.to_numpy(), index=(chave + cargo_norm)[titulares.index]).groupby(level=0).last()
+    herdar = titular.notna() & (res == "")
+    res[herdar] = (chave + titular)[herdar].map(mapa).fillna("")
+    # Suplente de senador não assume o mandato só por a chapa vencer.
+    suplente_eleito = herdar & (titular == "SENADOR") & res.str.startswith("ELEITO")
+    res[suplente_eleito] = "SUPLENTE (CHAPA ELEITA)"
+    df["DS_SIT_TOT_TURNO"] = res
+    return int(herdar.sum() - (res[herdar] == "").sum())
+
+
 def carregar_candidaturas(raw, anos, bens, tab):
+    correcoes = carregar_correcoes()
     blocos = []
     for caminho in sorted(glob.glob(os.path.join(raw, "consulta_cand_*.zip"))):
         ano = ano_do_arquivo(caminho)
@@ -145,6 +182,7 @@ def carregar_candidaturas(raw, anos, bens, tab):
         df = (df.sort_values("_turno", kind="stable")
                 .drop_duplicates(["SG_UE", "DS_CARGO", "SQ_CANDIDATO"], keep="last")
                 .reset_index(drop=True))
+        herdados = completar_resultados(df, ano, correcoes)
         suplementar = df["NM_TIPO_ELEICAO"].str.upper().str.contains("SUPLEMENTAR")
         eleicao = df["DS_ELEICAO"].where(suplementar, "")
         if ano in bens:
@@ -170,7 +208,7 @@ def carregar_candidaturas(raw, anos, bens, tab):
             "nasc": df["DT_NASCIMENTO"].to_numpy(),
         }))
         extra = f", {com_bens:.0%} com bens declarados" if com_bens is not None else ""
-        log(f"candidaturas {ano}: {len(df):,}{extra}")
+        log(f"candidaturas {ano}: {len(df):,}{extra}, {herdados:,} resultados de vice/suplente herdados do titular")
     return pd.concat(blocos, ignore_index=True)
 
 

@@ -1,0 +1,9 @@
+# Correções de resultados que o TSE publica em branco (DS_SIT_TOT_TURNO = #NULO#).
+# Só são aplicadas quando o resultado original está vazio.
+# nr_candidato = * vale para todos os demais candidatos daquele cargo/UE.
+# Vices e suplentes não precisam ser listados: herdam o resultado do titular.
+ano;cargo;sg_ue;nr_candidato;resultado;fonte
+# 2006: o arquivo consulta_cand_2006 não traz o 2º turno de presidente nem resultados do 1º.
+# Resultado oficial: Lula (PT, 13) eleito no 2º turno contra Geraldo Alckmin (PSDB, 45).
+2006;PRESIDENTE;BR;13;ELEITO;https://www.tse.jus.br/eleicoes/eleicoes-anteriores/eleicoes-2006
+2006;PRESIDENTE;BR;*;NÃO ELEITO;https://www.tse.jus.br/eleicoes/eleicoes-anteriores/eleicoes-2006
