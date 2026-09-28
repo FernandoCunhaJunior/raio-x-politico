@@ -79,22 +79,85 @@ async function localizar(tk) {
 
 async function pessoa(pid) {
   const lote = await getJson(`data/p/${Math.floor(pid / META.por_arquivo)}.json`);
-  const [nome, urnas, anoNasc, ocupacao, cands, cpf] = lote[pid % META.por_arquivo];
-  return { pid, nome, urnas, anoNasc, cpf, ocupacao: META.tabelas.ocupacao[ocupacao], cands: cands.map(candidatura) };
+  const [nome, urnas, anoNasc, ocupacao, cands, cpf, perfil] = lote[pid % META.por_arquivo];
+  const T = META.tabelas;
+  const [genero, instrucao, cor, ufNasc] = perfil || [0, 0, 0, ""];
+  return {
+    pid, nome, urnas, anoNasc, cpf, ocupacao: T.ocupacao[ocupacao], cands: cands.map(candidatura),
+    perfil: { genero: T.genero?.[genero], instrucao: T.instrucao?.[instrucao], cor: T.cor?.[cor], ufNasc },
+  };
 }
 
-function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa]) {
+// Posições definidas em scripts/build.py (gerar)
+function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao]) {
   const T = META.tabelas;
   const [uf, local] = T.ue[ue].split("|");
   const [sigla, nomePartido] = T.partido[partido].split("|");
   const res = T.resultado[resultado];
   return {
-    ano, cargo: T.cargo[cargo], uf, local, sigla, nomePartido,
+    ano, cargoCod: cargo, cargo: T.cargo[cargo], uf, local, sigla, nomePartido,
     situacao: T.situacao[situacao], resultado: res,
     eleito: /^ELEITO|^M[EÉ]DIA$/.test(res), bens, eleicao: T.eleicao[eleicao],
     // Companheiros de chapa: [pid, código do cargo, nome]
     chapa: (chapa || []).map(([pid, c, nome]) => ({ pid, cargo: T.cargo[c], nome })),
+    porTipo: porTipo || null,
+    ocupacao: T.ocupacao[ocupacao || 0],
+    coligacao: coligacao || "",
   };
+}
+
+// ---------- Inflação e indicadores ----------
+
+// Fator para trazer um valor declarado em outubro de `ano` para o mês mais recente do IPCA.
+function fatorIpca(ano) {
+  const ip = META.ipca;
+  const base = ip && ip.outubro[String(ano)];
+  return base ? ip.ref_indice / base : null;
+}
+const real = (v, ano) => (v == null ? null : v * (fatorIpca(ano) ?? 1));
+const mesRef = () => {
+  const m = META.ipca?.ref_mes;
+  return m ? `${["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][+m.slice(4) - 1]}/${m.slice(0, 4)}` : "hoje";
+};
+
+// Situações que merecem destaque (indeferimento, cassação, renúncia...).
+const PROBLEMA = /INDEFER|CASSA|RENUN|CANCEL|INAPTO|FALEC|IMPUGN|NAO CONHEC|INELEG/;
+const temProblema = (c) => PROBLEMA.test(normaliza(c.situacao || "")) || PROBLEMA.test(normaliza(c.resultado || ""));
+
+// Variação do patrimônio entre a eleição em que foi eleito(a) e a declaração seguinte
+// feita durante aquele mandato (4 anos; 8 para senador), em valores corrigidos.
+function variacoesNoMandato(p) {
+  const out = [];
+  p.cands.forEach((c, i) => {
+    if (!c.eleito || !(c.bens > 0)) return;
+    const dur = normaliza(c.cargo) === "SENADOR" ? 8 : 4;
+    const prox = p.cands.slice(i + 1).find((d) => d.ano > c.ano && d.ano <= c.ano + dur && d.bens !== null);
+    if (!prox) return;
+    const v0 = real(c.bens, c.ano), v1 = real(prox.bens, prox.ano);
+    out.push({ c, prox, v0, v1, pct: (v1 / v0 - 1) * 100 });
+  });
+  return out;
+}
+
+// Posição do patrimônio entre os eleitos do mesmo cargo no mesmo ano (percentil).
+function comparacaoPares(p) {
+  const c = [...p.cands].reverse().find((x) => x.eleito && x.bens !== null && META.percentis?.[`${x.ano}|${x.cargoCod}`]);
+  if (!c) return null;
+  const pct = META.percentis[`${c.ano}|${c.cargoCod}`];
+  let n = 0;
+  while (n < 100 && pct[n + 1] < c.bens) n++;
+  return { c, pct: n };
+}
+
+function companheiros(p) {
+  const m = new Map();
+  for (const c of p.cands) for (const x of c.chapa) {
+    const papel = TITULARES.has(normaliza(x.cargo)) ? "Titular" : cap(x.cargo);
+    const e = m.get(x.pid) || { pid: x.pid, nome: x.nome, vezes: [] };
+    e.vezes.push(`${c.ano} (${papel.toLowerCase()})`);
+    m.set(x.pid, e);
+  }
+  return [...m.values()].sort((a, b) => b.vezes.length - a.vezes.length);
 }
 
 function resumo(p) {
@@ -231,6 +294,11 @@ async function mostrarFicha(pid, unica = false) {
   const bensAnos = p.cands.filter((c) => c.bens !== null);
   const ultimoBens = [...bensAnos].reverse().find((c) => c.bens > 0);
   const temResultados = !unica && $("#resultados").innerHTML;
+  const problemas = p.cands.filter(temProblema);
+  const trocas = Math.max(0, r.partidos.length - 1);
+  const mandatos = variacoesNoMandato(p);
+  const pares = comparacaoPares(p);
+  const comp = companheiros(p);
 
   $("#ficha").innerHTML = `
     ${temResultados ? `<button class="voltar" id="voltar">← voltar aos resultados</button>` : ""}
@@ -239,7 +307,12 @@ async function mostrarFicha(pid, unica = false) {
       <div>
         <h2>${esc(cap(p.nome))}</h2>
         <div class="linha">${p.urnas.length ? `Nome de urna: ${p.urnas.map((u) => `“${esc(u)}”`).join(", ")}` : ""}
-          ${p.anoNasc ? ` · nascimento: ${p.anoNasc}` : ""}${p.cpf ? ` · CPF: ${esc(p.cpf)}` : ""}${p.ocupacao ? ` · ocupação declarada: ${esc(cap(p.ocupacao))}` : ""}</div>
+          ${p.cpf ? ` · CPF: ${esc(p.cpf)}` : ""}</div>
+        <div class="selos-topo">
+          ${r.eleicoes.length ? `<span class="selo ok">eleito(a) ${r.eleicoes.length}×</span>` : `<span class="selo neutro">nunca eleito(a)</span>`}
+          ${trocas ? `<span class="selo neutro">${trocas} troca${trocas > 1 ? "s" : ""} de partido</span>` : ""}
+          ${problemas.length ? `<span class="selo alerta">${problemas.length} candidatura${problemas.length > 1 ? "s" : ""} com restrição</span>` : ""}
+        </div>
       </div>
     </div>
 
@@ -247,32 +320,94 @@ async function mostrarFicha(pid, unica = false) {
       <div class="kpi"><div class="rot">Já foi candidato(a)?</div><div class="val">Sim, ${p.cands.length}×</div></div>
       <div class="kpi destaque"><div class="rot">Já foi eleito(a)?</div><div class="val">${r.eleicoes.length ? `Sim, ${r.eleicoes.length}×` : "Não"}</div></div>
       <div class="kpi"><div class="rot">Último cargo em que foi eleito(a)</div><div class="val pequeno">${ultimaEleicao ? `${esc(cap(ultimaEleicao.cargo))} (${ultimaEleicao.ano})<br><span class="muted">${esc(localTexto(ultimaEleicao))}</span>` : "—"}</div></div>
-      <div class="kpi"><div class="rot">Patrimônio declarado mais recente</div><div class="val pequeno">${ultimoBens ? `${brl.format(ultimoBens.bens)} <span class="muted">(${ultimoBens.ano})</span>` : "—"}</div></div>
+      <div class="kpi"><div class="rot">Patrimônio declarado mais recente</div><div class="val pequeno">${ultimoBens ? `${brl.format(ultimoBens.bens)} <span class="muted">(${ultimoBens.ano})</span><br><span class="muted">≈ ${brl.format(real(ultimoBens.bens, ultimoBens.ano))} em ${mesRef()}</span>` : "—"}</div></div>
+    </div>
+
+    ${blocoPerfil(p)}
+
+    ${mandatos.length || pares ? `<div class="bloco">
+      <h3>Patrimônio em perspectiva</h3>
+      <ul class="fatos">
+        ${mandatos.map((m) => `<li><span class="fato-ico ${m.pct > 0 ? "sobe" : "desce"}">${m.pct > 0 ? "▲" : "▼"}</span>
+          <span>Eleito(a) <strong>${esc(cap(m.c.cargo))}</strong> em ${m.c.ano}: na declaração seguinte, em ${m.prox.ano}, o patrimônio
+          ${m.pct >= 0 ? "cresceu" : "caiu"} <strong>${fmtPct(Math.abs(m.pct))}</strong> já descontada a inflação
+          <span class="muted">(${brl.format(m.v0)} → ${brl.format(m.v1)}, em R$ de ${mesRef()})</span>.</span></li>`).join("")}
+        ${pares ? `<li><span class="fato-ico">≡</span><span>Em ${pares.c.ano}, o patrimônio declarado (${brl.format(pares.c.bens)}) era
+          maior que o de <strong>${pares.pct}%</strong> dos eleitos para ${esc(cap(pares.c.cargo))} naquele ano.</span></li>` : ""}
+      </ul>
+      <p class="nota">Comparações feitas apenas com números declarados ao TSE, corrigidos pelo IPCA (IBGE). Variações podem ter
+        explicações legítimas (herança, venda, reavaliação de bens) e não indicam irregularidade por si só.</p>
+    </div>` : ""}
+
+    <div class="bloco">
+      <h3>Composição e evolução do patrimônio</h3>
+      <div class="alternar" role="group" aria-label="Tipo de valor">
+        <button type="button" data-modo="real" aria-pressed="true">Corrigido pela inflação</button>
+        <button type="button" data-modo="nominal" aria-pressed="false">Valor declarado</button>
+      </div>
+      <div id="grafico-bens">${graficoBens(bensAnos, "real")}</div>
     </div>
 
     <div class="bloco">
       <h3>Trajetória partidária</h3>
       <div class="partidos">${r.partidos.map((x, i) => `${i ? `<span class="seta-p">→</span>` : ""}<span class="partido" title="${esc(x.nome)}"><i style="background:${corPartido(x.sigla)}"></i><strong>${esc(x.sigla)}</strong> <small>${x.de === x.ate ? x.de : `${x.de}–${x.ate}`}</small></span>`).join("")}</div>
-      <p class="nota">Partido pelo qual concorreu em cada eleição, em ordem cronológica.</p>
+      <p class="nota">Partido pelo qual concorreu em cada eleição, em ordem cronológica${trocas ? ` — ${trocas} troca${trocas > 1 ? "s" : ""} de partido` : ""}. As coligações aparecem na tabela de candidaturas.</p>
     </div>
 
-    <div class="bloco">
-      <h3>Evolução do patrimônio declarado</h3>
-      ${graficoBens(bensAnos)}
-    </div>
+    ${comp.length ? `<div class="bloco">
+      <h3>Já compôs chapa com</h3>
+      <div class="companheiros">${comp.map((x) => `<a class="companheiro" href="${linkPessoa(x.pid, x.nome)}">
+        <span class="avatar pequeno" aria-hidden="true">${esc(iniciais(x.nome))}</span>
+        <span><strong>${esc(cap(x.nome))}</strong><small>${esc(x.vezes.join(", "))}</small></span></a>`).join("")}</div>
+    </div>` : ""}
 
     <div class="bloco">
       <h3>Candidaturas</h3>
       <div class="tabela-wrap"><table>
-        <thead><tr><th>Ano</th><th>Cargo</th><th>Local</th><th>Partido</th><th>Resultado</th><th>Chapa</th><th class="num">Bens declarados</th></tr></thead>
+        <thead><tr><th>Ano</th><th>Cargo</th><th>Local</th><th>Partido / coligação</th><th>Resultado</th><th>Chapa</th><th class="num">Bens declarados</th></tr></thead>
         <tbody>${[...p.cands].reverse().map(linhaCand).join("")}</tbody>
       </table></div>
       <p class="nota">Fonte: TSE. Em “Chapa”, clique no nome do vice, titular ou suplente para abrir a ficha dele(a).
-        “2º turno” indica que a apuração final não consta no arquivo do TSE; situações como “indeferido” ou “renúncia” aparecem abaixo do resultado.</p>
+        Candidaturas com restrição (indeferidas, cassadas, com renúncia etc.) aparecem com o selo vermelho.
+        “2º turno” indica que a apuração final não consta no arquivo do TSE.</p>
     </div>`;
   const v = $("#voltar");
   if (v) v.onclick = () => history.back();
+  for (const b of document.querySelectorAll(".alternar button")) {
+    b.onclick = () => {
+      for (const o of document.querySelectorAll(".alternar button")) o.setAttribute("aria-pressed", String(o === b));
+      $("#grafico-bens").innerHTML = graficoBens(bensAnos, b.dataset.modo);
+    };
+  }
   window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
+}
+
+const fmtPct = (x) => `${x.toLocaleString("pt-BR", { maximumFractionDigits: x < 10 ? 1 : 0 })}%`;
+
+function blocoPerfil(p) {
+  const f = p.perfil;
+  const itens = [];
+  const hoje = new Date().getFullYear();
+  if (p.anoNasc) itens.push(["Nascimento", `${p.anoNasc} <span class="muted">(${hoje - p.anoNasc} anos em ${hoje})</span>`]);
+  if (f.ufNasc) itens.push(["Natural de", esc(f.ufNasc)]);
+  if (f.genero) itens.push(["Gênero", esc(cap(f.genero))]);
+  if (f.cor) itens.push(["Cor/raça", esc(cap(f.cor))]);
+  if (f.instrucao) itens.push(["Instrução", esc(cap(f.instrucao))]);
+  // Ocupação declarada em cada eleição, agrupando anos consecutivos iguais.
+  const ocup = [];
+  for (const c of p.cands) {
+    if (!c.ocupacao) continue;
+    const u = ocup[ocup.length - 1];
+    if (u && u.nome === c.ocupacao) u.ate = c.ano;
+    else ocup.push({ nome: c.ocupacao, de: c.ano, ate: c.ano });
+  }
+  if (!itens.length && !ocup.length) return "";
+  return `<div class="bloco">
+    <h3>Perfil</h3>
+    <dl class="perfil">${itens.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl>
+    ${ocup.length ? `<div class="ocupacoes"><span class="muted">Ocupação declarada:</span>
+      ${ocup.map((o) => `<span class="ocup">${esc(cap(o.nome))} <small>${o.de === o.ate ? o.de : `${o.de}–${o.ate}`}</small></span>`).join('<span class="seta-p">→</span>')}</div>` : ""}
+  </div>`;
 }
 
 function chapaHtml(c) {
@@ -291,47 +426,65 @@ function chapaHtml(c) {
 }
 
 function linhaCand(c) {
-  const sit = c.situacao && !/^(APTO|DEFERIDO)/.test(c.situacao) ? `<div class="muted">${esc(cap(c.situacao))}</div>` : "";
+  const problema = temProblema(c);
+  const sit = c.situacao && !/^(APTO|DEFERIDO)/.test(c.situacao)
+    ? `<div>${problema ? `<span class="selo alerta" style="margin:4px 0 0">${esc(cap(c.situacao))}</span>` : `<span class="muted">${esc(cap(c.situacao))}</span>`}</div>` : "";
   const res = c.resultado ? (c.eleito ? `<span class="selo ok" style="margin:0">${esc(cap(c.resultado))}</span>` : esc(cap(c.resultado))) : `<span class="muted">—</span>`;
   const bens = c.bens === null ? `<span class="muted">n/d</span>` : brl.format(c.bens);
-  return `<tr class="${c.eleito ? "eleito" : ""}">
+  const colig = c.coligacao ? `<div class="colig" title="Coligação/federação">${esc(c.coligacao)}</div>` : "";
+  return `<tr class="${c.eleito ? "eleito" : ""}${problema ? " problema" : ""}">
     <td>${c.ano}${c.eleicao ? `<div class="muted">${esc(cap(c.eleicao))}</div>` : ""}</td>
     <td>${esc(cap(c.cargo))}</td><td>${esc(localTexto(c))}</td>
-    <td title="${esc(c.nomePartido)}">${esc(c.sigla)}</td>
+    <td class="partido-cel" title="${esc(c.nomePartido)}"><strong>${esc(c.sigla)}</strong>${colig}</td>
     <td>${res}${sit}</td><td class="chapa-cel">${chapaHtml(c)}</td><td class="num">${bens}</td></tr>`;
 }
 
-function graficoBens(cands) {
-  // Um ponto por ano (se concorreu a mais de um cargo no mesmo ano, fica o maior valor).
+// Gráfico de barras empilhadas por categoria de bem. modo: "real" (corrigido pelo IPCA) ou "nominal".
+function graficoBens(cands, modo) {
+  const CATS = META.categorias_bens || ["Total"];
+  // Um ponto por ano (se concorreu a mais de um cargo no mesmo ano, fica a declaração de maior valor).
   const porAno = new Map();
-  for (const c of cands) porAno.set(c.ano, Math.max(porAno.get(c.ano) ?? 0, c.bens));
-  const pts = [...porAno].sort((a, b) => a[0] - b[0]);
+  for (const c of cands) if (!porAno.has(c.ano) || c.bens > porAno.get(c.ano).bens) porAno.set(c.ano, c);
+  const pts = [...porAno.values()].sort((a, b) => a.ano - b.ano).map((c) => {
+    const f = modo === "real" ? (fatorIpca(c.ano) ?? 1) : 1;
+    const partes = (c.porTipo || (c.bens ? [0, 0, 0, 0, 0, c.bens] : [0, 0, 0, 0, 0, 0])).map((v) => v * f);
+    return { ano: c.ano, total: c.bens * f, partes };
+  });
   if (!pts.length) return `<p class="muted">Sem declarações de bens disponíveis (o TSE publica bens a partir de 2006).</p>`;
 
-  const W = 720, H = 250, M = { t: 26, r: 12, b: 28, l: 12 };
-  const max = Math.max(...pts.map((p) => p[1]), 1);
+  const W = 720, H = 260, M = { t: 26, r: 12, b: 28, l: 12 };
+  const max = Math.max(...pts.map((p) => p.total), 1);
   const passo = (W - M.l - M.r) / pts.length;
   const bw = Math.min(70, passo * 0.6);
-  const barras = pts.map(([ano, v], i) => {
-    const h = (v / max) * (H - M.t - M.b);
+  const escala = (H - M.t - M.b) / max;
+  const barras = pts.map((p, i) => {
     const x = M.l + passo * i + (passo - bw) / 2;
-    const y = H - M.b - h;
-    return `<rect class="barra" x="${x}" y="${y}" width="${bw}" height="${Math.max(h, v > 0 ? 2 : 0)}" rx="4"><title>${ano}: ${brl.format(v)}</title></rect>
-      <text class="valor" x="${x + bw / 2}" y="${y - 7}" text-anchor="middle">${v ? "R$ " + brlCurto.format(v) : "R$ 0"}</text>
-      <text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${ano}</text>`;
+    let y = H - M.b;
+    const segs = p.partes.map((v, k) => {
+      if (v <= 0) return "";
+      const h = Math.max(v * escala, 1);
+      y -= h;
+      return `<rect class="cat${k}" x="${x}" y="${y}" width="${bw}" height="${h}"><title>${p.ano} · ${CATS[k]}: ${brl.format(v)}</title></rect>`;
+    }).join("");
+    const topo = H - M.b - p.total * escala;
+    return `${segs}<text class="valor" x="${x + bw / 2}" y="${topo - 7}" text-anchor="middle">${p.total ? "R$ " + brlCurto.format(p.total) : "R$ 0"}</text>
+      <text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle">${p.ano}</text>`;
   }).join("");
 
+  const presentes = CATS.map((_, k) => k).filter((k) => pts.some((p) => p.partes[k] > 0));
+  const legenda = presentes.length ? `<div class="legenda">${presentes.map((k) => `<span><i class="cat${k}"></i>${CATS[k]}</span>`).join("")}</div>` : "";
+
   let variacao = "";
-  const validos = pts.filter((p) => p[1] > 0);
+  const validos = pts.filter((p) => p.total > 0);
   if (validos.length >= 2) {
-    const [a0, v0] = validos[0], [a1, v1] = validos[validos.length - 1];
-    const pct = (v1 / v0 - 1) * 100;
-    variacao = `<p class="nota">De ${a0} para ${a1}: ${brl.format(v0)} → <strong>${brl.format(v1)}</strong> (${pct >= 0 ? "+" : ""}${pct.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%, valores nominais sem correção pela inflação).</p>`;
+    const a = validos[0], b = validos[validos.length - 1];
+    const pct = (b.total / a.total - 1) * 100;
+    variacao = `<p class="nota">De ${a.ano} para ${b.ano}: ${brl.format(a.total)} → <strong>${brl.format(b.total)}</strong>
+      (${pct >= 0 ? "+" : "−"}${fmtPct(Math.abs(pct))}${modo === "real" ? `, em R$ de ${mesRef()}, corrigido pelo IPCA` : ", valores nominais sem correção"}).</p>`;
   }
-  return `<div class="grafico"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Patrimônio declarado por ano">
-    <defs><linearGradient id="gBarra" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#e02229"/><stop offset="1" stop-color="#8e1116"/></linearGradient></defs>
+  return `${legenda}<div class="grafico"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Patrimônio declarado por ano e tipo de bem">
     <line class="eixo" x1="${M.l}" x2="${W - M.r}" y1="${H - M.b}" y2="${H - M.b}"/>${barras}</svg></div>${variacao}
-    <p class="nota">Soma dos bens declarados ao TSE em cada candidatura. R$ 0 significa que nenhum bem foi declarado.</p>`;
+    <p class="nota">Soma dos bens declarados ao TSE em cada candidatura, agrupados por tipo. R$ 0 significa que nenhum bem foi declarado.</p>`;
 }
 
 // ---------- Navegação (estado na URL) ----------

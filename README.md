@@ -5,7 +5,10 @@ Digite o nome de uma pessoa e veja:
 - se ela **já foi candidata** (eleições de 1994 a 2026);
 - se **já foi eleita**, para quais cargos e onde;
 - por quais **partidos** concorreu;
-- a **evolução do patrimônio declarado** ao TSE (2006 em diante).
+- a **evolução do patrimônio declarado** ao TSE (2006 em diante), por tipo de bem e corrigida pelo IPCA;
+- a variação do patrimônio **durante cada mandato** e a comparação com os demais eleitos do mesmo cargo;
+- perfil (nascimento, gênero, cor/raça, instrução, ocupações declaradas), coligações e **companheiros de chapa**
+  (vices e suplentes, com link para a ficha de cada um).
 
 🔎 **Site:** https://fernandocunhajunior.github.io/raio-x-politico/
 

@@ -200,6 +200,55 @@ tbody tr:hover { background: var(--surface-2); }
 .grafico text { fill: var(--muted); font-size: 12px; font-family: inherit; }
 .grafico text.valor { fill: var(--ink); font-weight: 700; }
 
+/* Cores das categorias de bens (ordem de CATEGORIAS em scripts/build.py) */
+:root { --cat0: #3b3b3f; --cat1: #9a9a9f; --cat2: #c4161c; --cat3: #e98a8e; --cat4: #e8a317; --cat5: #d6d3ce; }
+@media (prefers-color-scheme: dark) {
+  :root { --cat0: #d9d7d3; --cat1: #8d8b90; --cat2: #ff4d53; --cat3: #f2a6a9; --cat4: #f0b429; --cat5: #55545a; }
+}
+.cat0 { fill: var(--cat0); background: var(--cat0); }
+.cat1 { fill: var(--cat1); background: var(--cat1); }
+.cat2 { fill: var(--cat2); background: var(--cat2); }
+.cat3 { fill: var(--cat3); background: var(--cat3); }
+.cat4 { fill: var(--cat4); background: var(--cat4); }
+.cat5 { fill: var(--cat5); background: var(--cat5); }
+.grafico rect { stroke: var(--surface); stroke-width: 1; }
+.legenda { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 10px; font-size: .86rem; color: var(--muted); }
+.legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.legenda i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+.alternar { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; margin-bottom: 10px; background: var(--surface-2); }
+.alternar button { font: inherit; font-size: .85rem; border: 0; background: none; color: var(--muted); padding: 5px 14px; border-radius: 999px; cursor: pointer; }
+.alternar button[aria-pressed="true"] { background: var(--grafite); color: #fff; }
+
+.selos-topo { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.selos-topo .selo { margin: 0; }
+.selo.alerta { background: rgba(196, 22, 28, .12); color: var(--vermelho); border: 1px solid rgba(196, 22, 28, .3); }
+@media (prefers-color-scheme: dark) { .selo.alerta { color: #ff7b80; } }
+tr.problema td:first-child { box-shadow: inset 4px 0 0 var(--vermelho); }
+
+.fatos { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.fatos li { display: flex; gap: 12px; align-items: flex-start; }
+.fato-ico { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; font-size: .8rem; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); }
+.fato-ico.sobe { color: var(--vermelho); background: rgba(196, 22, 28, .08); border-color: rgba(196, 22, 28, .25); }
+.fato-ico.desce { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+
+.perfil { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; margin: 0; }
+.perfil dt { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.perfil dd { margin: 2px 0 0; font-weight: 600; }
+.ocupacoes { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: .9rem; }
+.ocup { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+.ocup small { color: var(--muted); }
+
+.companheiros { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.companheiro { display: flex; gap: 10px; align-items: center; text-decoration: none; color: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; transition: border-color .12s; }
+.companheiro:hover { border-color: var(--vermelho); }
+.companheiro strong { display: block; font-size: .92rem; }
+.companheiro small { color: var(--muted); font-size: .8rem; }
+.avatar.pequeno { width: 34px; height: 34px; font-size: .8rem; }
+
+td.partido-cel { white-space: normal; min-width: 90px; }
+.colig { font-size: .78rem; color: var(--muted); max-width: 220px; line-height: 1.35; margin-top: 2px; }
+
 /* ---------- Rodapé ---------- */
 .rodape { background: var(--grafite); color: #cfcdca; margin-top: 24px; border-top: 4px solid var(--vermelho); }
 .rodape-inner { display: flex; gap: 24px; align-items: flex-start; padding-top: 28px; padding-bottom: 36px; font-size: .86rem; }
