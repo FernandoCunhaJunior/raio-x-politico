@@ -34,6 +34,12 @@ N_BUCKETS = 4096          # precisa bater com site/app.js
 PESSOAS_POR_ARQUIVO = 256  # precisa bater com site/app.js
 LIMITE_LISTA = 5000        # chaves com mais pessoas que isso viram só um contador
 
+PESO_CARGO = {  # chaves normalizadas (sem acento/hífen)
+    "PRESIDENTE": 9, "VICE PRESIDENTE": 8, "GOVERNADOR": 7, "SENADOR": 7,
+    "VICE GOVERNADOR": 6, "DEPUTADO FEDERAL": 5, "PREFEITO": 4,
+    "DEPUTADO ESTADUAL": 4, "DEPUTADO DISTRITAL": 4, "VICE PREFEITO": 3, "VEREADOR": 2,
+}
+
 COLS_CAND = [
     "ANO_ELEICAO", "NM_TIPO_ELEICAO", "NR_TURNO", "CD_ELEICAO", "DS_ELEICAO",
     "SG_UF", "SG_UE", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NM_CANDIDATO",
@@ -235,9 +241,18 @@ def gerar(df, rot, nome_norm, tab, out):
     inicios = np.flatnonzero(np.r_[True, col["pid"][1:] != col["pid"][:-1]])
     fins = np.r_[inicios[1:], len(df)]
 
+    # Relevância usada para ordenar as listas do índice: cargo mais alto em que foi
+    # eleito(a), depois número de vitórias, depois número de candidaturas.
+    peso_cargo = np.array([PESO_CARGO.get(normaliza(c), 1) for c in tab["cargo"].itens])
+    foi_eleito = np.array([bool(re.match(r"ELEITO|MEDIA$", normaliza(r))) for r in tab["resultado"].itens])
+    relevancia = [0] * n_pessoas
+
     buckets = [dict() for _ in range(N_BUCKETS)]
     lote = []
     for pid, (a, b) in enumerate(zip(inicios, fins)):
+        el = foi_eleito[col["resultado"][a:b]]
+        melhor = int(peso_cargo[col["cargo"][a:b]][el].max()) if el.any() else 0
+        relevancia[pid] = melhor * 1_000_000 + int(el.sum()) * 1_000 + int(b - a)
         urnas = []
         for u in col["urna"][a:b][::-1]:
             if u and u not in urnas:
@@ -276,12 +291,16 @@ def gerar(df, rot, nome_norm, tab, out):
             log(f"  {pid:,} pessoas gravadas")
 
     for i, balde in enumerate(buckets):
+        for k, lista in balde.items():
+            if isinstance(lista, list) and len(lista) > 1:
+                lista.sort(key=lambda p: -relevancia[p])
         with open(os.path.join(out, "idx", f"{i:03x}.json"), "w", encoding="utf-8") as f:
             json.dump(balde, f, separators=(",", ":"))
 
     anos = sorted(int(a) for a in np.unique(col["ano"]))
     meta = {
         "gerado_em": time.strftime("%Y-%m-%d"),
+        "versao": time.strftime("%Y%m%d%H%M%S"),  # usada pelo site para invalidar cache
         "fonte": "Portal de Dados Abertos do TSE — https://dadosabertos.tse.jus.br",
         "anos": anos,
         "pessoas": n_pessoas,

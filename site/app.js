@@ -11,9 +11,12 @@ const brlCurto = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFr
 let META = null;
 const cacheJson = new Map();
 
+// meta.json é sempre revalidado; os demais arquivos levam a versão do build na URL,
+// para que o cache do navegador nunca misture arquivos de builds diferentes.
 function getJson(url) {
   if (!cacheJson.has(url)) {
-    cacheJson.set(url, fetch(url).then((r) => {
+    const fonte = META ? `${url}?v=${META.versao}` : url;
+    cacheJson.set(url, fetch(fonte, META ? {} : { cache: "no-cache" }).then((r) => {
       if (!r.ok) throw new Error(`${r.status} ao carregar ${url}`);
       return r.json();
     }));
@@ -46,14 +49,10 @@ async function buscarChave(chave) {
   return balde[chave]; // lista de ids, número (muitas pessoas) ou undefined
 }
 
+// As listas do índice já vêm ordenadas por relevância; a interseção preserva essa ordem.
 function intersecta(listas) {
-  listas.sort((a, b) => a.length - b.length);
-  let atual = new Set(listas[0]);
-  for (const l of listas.slice(1)) {
-    const s = new Set(l);
-    atual = new Set([...atual].filter((x) => s.has(x)));
-  }
-  return [...atual].sort((a, b) => a - b);
+  const outras = listas.slice(1).map((l) => new Set(l));
+  return listas[0].filter((x) => outras.every((s) => s.has(x)));
 }
 
 // Retorna { ids } ou { muitos: true }
@@ -108,7 +107,11 @@ function resumo(p) {
 }
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const cap = (s) => (s || "").toLowerCase().replace(/(^|[\s(/-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+const MINUSCULAS = new Set(["da", "de", "do", "das", "dos", "e", "em", "por", "a", "o"]);
+const cap = (s) => (s || "").toLowerCase()
+  .replace(/(^|[\s(/-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase())
+  .replace(/(?<=\s)(\p{L}+)/gu, (w) => (MINUSCULAS.has(w.toLowerCase()) ? w.toLowerCase() : w))
+  .replace(/\bQp\b/g, "QP");
 
 function setStatus(msg, erro = false) {
   const el = $("#status");
@@ -137,16 +140,10 @@ async function executarBusca(q) {
     const ids = r.ids.slice(0, MAX_RESULTADOS);
     const pessoas = await Promise.all(ids.map(pessoa));
     const qJunto = tk.join(" ");
-    const pontua = (p) => {
-      const nome = tokens(normaliza(p.nome)).join(" ");
-      const urnas = p.urnas.map((u) => tokens(normaliza(u)).join(" "));
-      const exato = nome === qJunto || urnas.includes(qJunto) ? 1 : 0;
-      return [exato, p.cands.filter((c) => c.eleito).length, p.cands.length];
-    };
-    pessoas.sort((a, b) => {
-      const pa = pontua(a), pb = pontua(b);
-      return pb[0] - pa[0] || pb[1] - pa[1] || pb[2] - pa[2];
-    });
+    // Nome (ou nome de urna) idêntico ao buscado vem primeiro; o resto mantém a
+    // ordem de relevância do índice (sort é estável).
+    const exato = (p) => [p.nome, ...p.urnas].some((n) => tokens(normaliza(n)).join(" ") === qJunto) ? 1 : 0;
+    pessoas.sort((a, b) => exato(b) - exato(a));
     if (pessoas.length === 1) return mostrarFicha(pessoas[0].pid, true);
     const extra = r.ids.length > MAX_RESULTADOS ? ` (mostrando ${MAX_RESULTADOS}; refine a busca para ver outros)` : "";
     setStatus(`${r.ids.length} pessoa${r.ids.length > 1 ? "s" : ""} encontrada${r.ids.length > 1 ? "s" : ""}${extra}.`);
