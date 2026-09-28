@@ -36,12 +36,12 @@ LIMITE_LISTA = 5000        # chaves com mais pessoas que isso viram só um conta
 
 COLS_CAND = [
     "ANO_ELEICAO", "NM_TIPO_ELEICAO", "NR_TURNO", "CD_ELEICAO", "DS_ELEICAO",
-    "SG_UF", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NM_CANDIDATO",
+    "SG_UF", "SG_UE", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NM_CANDIDATO",
     "NM_URNA_CANDIDATO", "NR_CPF_CANDIDATO", "DS_SITUACAO_CANDIDATURA",
     "SG_PARTIDO", "NM_PARTIDO", "DT_NASCIMENTO", "NR_TITULO_ELEITORAL_CANDIDATO",
     "DS_OCUPACAO", "DS_SIT_TOT_TURNO",
 ]
-COLS_BENS = ["SQ_CANDIDATO", "VR_BEM_CANDIDATO"]
+COLS_BENS = ["SG_UE", "SQ_CANDIDATO", "VR_BEM_CANDIDATO"]
 
 
 def log(*a):
@@ -120,7 +120,7 @@ def carregar_bens(raw, anos):
             continue
         df = ler_csv(caminho, COLS_BENS)
         df["v"] = para_reais(df["VR_BEM_CANDIDATO"])
-        bens[ano] = df.groupby("SQ_CANDIDATO")["v"].sum()
+        bens[ano] = df.groupby(df["SG_UE"] + "|" + df["SQ_CANDIDATO"])["v"].sum()
         log(f"bens {ano}: {len(df):,} itens, {len(bens[ano]):,} candidaturas")
     return bens
 
@@ -132,16 +132,17 @@ def carregar_candidaturas(raw, anos, bens, tab):
         if anos and ano not in anos:
             continue
         df = ler_csv(caminho, COLS_CAND)
-        # Quem foi ao 2º turno aparece duas vezes (com CD_ELEICAO diferente, mas o
-        # mesmo SQ_CANDIDATO); fica a linha do último turno.
+        # Quem foi ao 2º turno aparece duas vezes (o CD_ELEICAO muda entre turnos);
+        # fica a linha do último turno. Em anos antigos o SQ_CANDIDATO só é único
+        # dentro da unidade eleitoral, por isso a chave inclui SG_UE e cargo.
         df["_turno"] = pd.to_numeric(df["NR_TURNO"], errors="coerce").fillna(1)
         df = (df.sort_values("_turno", kind="stable")
-                .drop_duplicates(["SQ_CANDIDATO"], keep="last")
+                .drop_duplicates(["SG_UE", "DS_CARGO", "SQ_CANDIDATO"], keep="last")
                 .reset_index(drop=True))
         suplementar = df["NM_TIPO_ELEICAO"].str.upper().str.contains("SUPLEMENTAR")
         eleicao = df["DS_ELEICAO"].where(suplementar, "")
         if ano in bens:
-            valor = df["SQ_CANDIDATO"].map(bens[ano]).fillna(0.0).to_numpy()
+            valor = (df["SG_UE"] + "|" + df["SQ_CANDIDATO"]).map(bens[ano]).fillna(0.0).to_numpy()
             com_bens = (valor > 0).mean()
         else:
             valor = np.full(len(df), np.nan)
