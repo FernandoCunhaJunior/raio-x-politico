@@ -1,4 +1,4 @@
-# Raio-X Político
+# Lente Pública
 
 Digite o nome de uma pessoa e veja:
 
@@ -10,7 +10,7 @@ Digite o nome de uma pessoa e veja:
 - perfil (nascimento, gênero, cor/raça, instrução, ocupações declaradas), coligações e **companheiros de chapa**
   (vices e suplentes, com link para a ficha de cada um).
 
-🔎 **Site:** https://fernandocunhajunior.github.io/raio-x-politico/
+🔎 **Site:** https://lentepublica.com.br
 
 Todos os dados vêm do [Portal de Dados Abertos do TSE](https://dadosabertos.tse.jus.br).
 

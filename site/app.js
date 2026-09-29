@@ -288,7 +288,7 @@ async function executarBusca(q) {
   $("#q").value = q;
   const tk = tokens(normaliza(q));
   if (!tk.length) return setStatus("Digite um nome para buscar.");
-  setStatus("Investigando…", { carregando: true });
+  setStatus("Consultando…", { carregando: true });
   try {
     const r = await localizar(tk);
     if (r.muitos) {
