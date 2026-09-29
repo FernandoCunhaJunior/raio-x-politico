@@ -145,6 +145,11 @@ a { color: var(--link); }
 }
 .avatar.eleito { background: linear-gradient(145deg, #e02229, var(--vermelho-escuro)); }
 .avatar.grande { width: 72px; height: 72px; font-size: 1.5rem; }
+/* Com foto do TSE: retrato 3x4 na ficha, recorte circular nos resultados */
+.avatar.com-foto { background: var(--surface-2); overflow: hidden; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--line); }
+.avatar.com-foto.eleito { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--vermelho); }
+.avatar.com-foto img { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; display: block; animation: surge .3s ease both; }
+.avatar.grande.com-foto { width: 96px; height: 128px; border-radius: 12px; }
 
 .selo { display: inline-block; font-size: .75rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; margin-left: 8px; vertical-align: 2px; letter-spacing: .02em; }
 .selo.ok { background: var(--ok-bg); color: var(--ok); }

@@ -79,14 +79,56 @@ async function localizar(tk) {
 
 async function pessoa(pid) {
   const lote = await getJson(`data/p/${Math.floor(pid / META.por_arquivo)}.json`);
-  const [nome, urnas, anoNasc, ocupacao, cands, cpf, perfil, sancoes] = lote[pid % META.por_arquivo];
+  const [nome, urnas, anoNasc, ocupacao, cands, cpf, perfil, sancoes, fotos] = lote[pid % META.por_arquivo];
   const T = META.tabelas;
   const [genero, instrucao, cor, ufNasc] = perfil || [0, 0, 0, ""];
   return {
     pid, nome, urnas, anoNasc, cpf, ocupacao: T.ocupacao[ocupacao], cands: cands.map(candidatura),
     perfil: { genero: T.genero?.[genero], instrucao: T.instrucao?.[instrucao], cor: T.cor?.[cor], ufNasc },
     sancoes: (sancoes || []).map(sancao),
+    fotos: (fotos || []).map(([k, sq, ue]) => `${FOTO_BASE}/${META.fotos_eleicoes[k]}/${sq}/${ue}`),
   };
+}
+
+// ---------- Fotos (servidas pelo DivulgaCandContas/TSE, direto no navegador do visitante) ----------
+
+const FOTO_BASE = "https://divulgacandcontas.tse.jus.br/divulga/rest/arquivo/img";
+const fotoCache = new Map(); // url -> Promise<boolean> (true = foto real)
+
+// O TSE devolve uma silhueta genérica de 171x235 quando não há foto.
+function fotoReal(url) {
+  if (!fotoCache.has(url)) {
+    fotoCache.set(url, new Promise((res) => {
+      const img = new Image();
+      img.referrerPolicy = "no-referrer";
+      img.onload = () => res(!(img.naturalWidth === 171 && img.naturalHeight === 235));
+      img.onerror = () => res(false);
+      img.src = url;
+    }));
+  }
+  return fotoCache.get(url);
+}
+
+function avatar(p, classes = "") {
+  const eleito = p.cands.some((c) => c.eleito);
+  return `<span class="avatar ${classes}${eleito ? " eleito" : ""}" aria-hidden="true" data-fotos="${esc(JSON.stringify(p.fotos))}">${esc(iniciais(p.nome))}</span>`;
+}
+
+// Troca as iniciais pela primeira foto real disponível (tenta até 3 candidaturas recentes).
+async function ativarFotos(raiz = document) {
+  for (const el of raiz.querySelectorAll(".avatar[data-fotos]")) {
+    const urls = JSON.parse(el.dataset.fotos || "[]");
+    el.removeAttribute("data-fotos");
+    (async () => {
+      for (const u of urls) {
+        if (await fotoReal(u)) {
+          el.classList.add("com-foto");
+          el.innerHTML = `<img src="${esc(u)}" alt="" referrerpolicy="no-referrer">`;
+          return;
+        }
+      }
+    })();
+  }
 }
 
 // Posições definidas em scripts/build.py (carregar_sancoes)
@@ -265,6 +307,7 @@ async function executarBusca(q) {
     const extra = r.ids.length > MAX_RESULTADOS ? ` Mostrando as ${MAX_RESULTADOS} mais relevantes — refine a busca para ver outras.` : "";
     setStatus(`${r.ids.length.toLocaleString("pt-BR")} pessoa${r.ids.length > 1 ? "s" : ""} encontrada${r.ids.length > 1 ? "s" : ""}.${extra}`);
     $("#resultados").innerHTML = `<div class="lista">${pessoas.map(cartao).join("")}</div>`;
+    ativarFotos($("#resultados"));
   } catch (e) {
     console.error(e);
     setStatus("Não foi possível carregar os dados. Tente novamente.", { erro: true });
@@ -280,7 +323,7 @@ function cartao(p, i) {
   const periodo = r.de === r.ate ? r.de : `${r.de}–${r.ate}`;
   const partidos = [...new Set(r.partidos.map((x) => x.sigla))].join(", ");
   return `<button class="cartao" data-pid="${p.pid}" style="animation-delay:${Math.min(i, 12) * 25}ms">
-    <span class="avatar${r.eleicoes.length ? " eleito" : ""}" aria-hidden="true">${esc(iniciais(p.nome))}</span>
+    ${avatar(p)}
     <span class="info">
       <h3>${esc(cap(p.nome))}${selo}${p.sancoes.length ? `<span class="selo alerta">⚠ sanção registrada</span>` : ""}</h3>
       <div class="linha">${p.cands.length} candidatura${p.cands.length > 1 ? "s" : ""} (${periodo})${urna}</div>
@@ -318,7 +361,7 @@ async function mostrarFicha(pid, unica = false) {
   $("#ficha").innerHTML = `
     ${temResultados ? `<button class="voltar" id="voltar">← voltar aos resultados</button>` : ""}
     <div class="ficha-topo">
-      <span class="avatar grande${r.eleicoes.length ? " eleito" : ""}" aria-hidden="true">${esc(iniciais(p.nome))}</span>
+      ${avatar(p, "grande")}
       <div>
         <h2>${esc(cap(p.nome))}</h2>
         <div class="linha">${p.urnas.length ? `Nome de urna: ${p.urnas.map((u) => `“${esc(u)}”`).join(", ")}` : ""}
@@ -399,6 +442,7 @@ async function mostrarFicha(pid, unica = false) {
       $("#grafico-bens").innerHTML = graficoBens(bensAnos, b.dataset.modo);
     };
   }
+  ativarFotos($("#ficha"));
   window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
 }
 

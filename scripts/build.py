@@ -308,10 +308,29 @@ def carregar_candidaturas(raw, anos, bens, tab):
             "nasc": df["DT_NASCIMENTO"].to_numpy(),
             "sg_ue": df["SG_UE"].to_numpy(),
             "nr": df["NR_CANDIDATO"].to_numpy(),
+            "sq": df["SQ_CANDIDATO"].to_numpy(),
+            "uf": df["SG_UF"].to_numpy(),
         }))
         extra = f", {com_bens:.0%} com bens declarados" if com_bens is not None else ""
         log(f"candidaturas {ano}: {len(df):,}{extra}, {herdados:,} resultados de vice/suplente herdados do titular")
     return pd.concat(blocos, ignore_index=True)
+
+
+# Códigos internos das eleições ordinárias no DivulgaCandContas (usados na URL da foto do candidato).
+# Fonte: https://divulgacandcontas.tse.jus.br/divulga/rest/v1/eleicao/ordinarias — (ano, UF específica, código)
+ELEICOES_FOTO = [
+    (2004, None, "14431"), (2006, None, "14423"), (2008, None, "14422"), (2010, None, "14417"),
+    (2012, None, "1699"), (2014, None, "680"), (2016, None, "2"), (2018, None, "2022802018"),
+    (2020, "AP", "2032002020"), (2020, None, "2030402020"), (2022, None, "2040602022"),
+    (2024, None, "2045202024"), (2026, None, "20322002026"),
+]
+
+
+def indice_eleicao_foto(ano, uf):
+    for k, (a, u, _) in enumerate(ELEICOES_FOTO):
+        if a == ano and (u is None or u == uf):
+            return k
+    return None
 
 
 CADASTROS_CGU = ["ceis", "cnep", "ceaf"]
@@ -550,8 +569,9 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
     col = {c: df[c].to_numpy() for c in
            ["pid", "ano", "eleicao", "cargo", "ue", "partido", "situacao", "resultado",
             "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask",
-            "genero", "instrucao", "cor", "uf_nasc", "coligacao", "sanc", *[f"b{i}" for i in range(n_cat)]]}
-    com_sancao = 0
+            "genero", "instrucao", "cor", "uf_nasc", "coligacao", "sanc", "sq", "sg_ue", "uf",
+            *[f"b{i}" for i in range(n_cat)]]}
+    com_sancao = com_foto = 0
     inicios = np.flatnonzero(np.r_[True, col["pid"][1:] != col["pid"][:-1]])
     fins = np.r_[inicios[1:], len(df)]
 
@@ -601,9 +621,19 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
         ] + [next((x for x in col["uf_nasc"][a:b][::-1] if x), "")]
         pessoa = [col["nome"][b - 1], urnas[:5], ano_nasc, ocup, cands, cpf_mask, perfil]
         ids_sanc = sorted({j for x in col["sanc"][a:b] if isinstance(x, list) for j in x})
-        if ids_sanc:
-            pessoa.append([registros_sancoes[j] for j in ids_sanc])
-            com_sancao += 1
+        pessoa.append([registros_sancoes[j] for j in ids_sanc] if ids_sanc else None)
+        com_sancao += bool(ids_sanc)
+        # Referências de foto (DivulgaCandContas) das candidaturas mais recentes: [eleição, SQ, UE]
+        fotos = []
+        for i in range(b - 1, a - 1, -1):
+            k = indice_eleicao_foto(int(col["ano"][i]), col["uf"][i]) if col["eleicao"][i] == 0 else None
+            if k is not None and col["sq"][i]:
+                fotos.append([k, col["sq"][i], col["sg_ue"][i]])
+                if len(fotos) == 3:
+                    break
+        if fotos:
+            pessoa.append(fotos)
+            com_foto += 1
         lote.append(pessoa)
 
         urnas_norm = {normaliza(u) for u in urnas}
@@ -627,6 +657,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
             log(f"  {pid:,} pessoas gravadas")
 
     log(f"pessoas com registro em cadastro de sanções da CGU: {com_sancao:,}")
+    log(f"pessoas com referência de foto (2004+): {com_foto:,}")
     for i, balde in enumerate(buckets):
         for k, lista in balde.items():
             if isinstance(lista, list) and len(lista) > 1:
@@ -649,6 +680,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
         "percentis": percentis_eleitos(df, foi_eleito),
         "ipca": carregar_ipca(),
         "sancoes_fontes": fontes_sancoes,  # {"CEIS": "AAAAMMDD", ...}
+        "fotos_eleicoes": [e for _, _, e in ELEICOES_FOTO],  # índice usado nas referências de foto
     }
     with open(os.path.join(out, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, separators=(",", ":"))
