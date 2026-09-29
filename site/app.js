@@ -152,7 +152,7 @@ function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleica
   const [sigla, nomePartido] = T.partido[partido].split("|");
   const res = T.resultado[resultado];
   return {
-    ano, cargoCod: cargo, cargo: T.cargo[cargo], uf, local, sigla, nomePartido,
+    ano, cargoCod: cargo, ueCod: ue, cargo: T.cargo[cargo], uf, local, sigla, nomePartido,
     situacao: T.situacao[situacao], resultado: res,
     eleito: /^ELEITO|^M[EÉ]DIA$/.test(res), bens, eleicao: T.eleicao[eleicao],
     // Companheiros de chapa: [pid, código do cargo, nome]
@@ -232,6 +232,119 @@ function resumo(p) {
   return { de: Math.min(...anos), ate: Math.max(...anos), eleicoes, partidos, ufs };
 }
 
+// ---------- Espectro ideológico das legendas (Bolognesi, Ribeiro e Codato, 2023) ----------
+
+const siglaNorm = (s) => (s || "").replace(/\s+/g, "").toUpperCase();
+function regraPartido(sigla, ano) {
+  const s = siglaNorm(sigla);
+  return (META.espectro?.regras || []).find((r) => r[0] === s && ano >= r[1]) || null;
+}
+const faixaDe = (nota) => (META.espectro?.faixas || []).find(([lim]) => nota <= lim)?.[1] || "";
+const fmtNota = (n) => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+
+// Régua 0–10 com marcadores; `pontos` = [{nota, rotulo, principal?}]
+function reguaEspectro(pontos) {
+  const marcas = pontos.map((p) => `<span class="marca${p.principal ? " principal" : ""}" style="left:${(p.nota / 10) * 100}%"
+      title="${esc(p.rotulo)}: ${fmtNota(p.nota)}">${p.principal ? `<b>${fmtNota(p.nota)}</b>` : `<i>${esc(p.rotulo)}</i>`}</span>`).join("");
+  return `<div class="regua" role="img" aria-label="Escala de 0 (esquerda) a 10 (direita)">
+    <div class="regua-faixas">${(META.espectro?.faixas || []).map(([lim, nome], i, arr) => {
+      const ini = i ? arr[i - 1][0] : 0;
+      return `<span style="width:${((lim - ini) / 10) * 100}%" title="${esc(nome)}">${esc(nome)}</span>`;
+    }).join("")}</div>
+    <div class="regua-trilho">${marcas}</div>
+    <div class="regua-rotulos"><span>0 · esquerda</span><span>5</span><span>direita · 10</span></div>
+  </div>`;
+}
+
+function citacaoEspectro() {
+  const e = META.espectro || {};
+  return `Classificação de <a href="${esc(e.doi)}" target="_blank" rel="noopener">Bolognesi, Ribeiro e Codato (2023)</a>, revista
+    <em>Dados</em> — média das notas de 519 cientistas políticos em 2018, numa escala de 0 (esquerda) a 10 (direita), com as faixas
+    definidas pelos autores. Legendas renomeadas herdam a nota do partido de origem; fusões recentes (ex.: União Brasil, PRD) e
+    legendas antigas não avaliadas ficam sem classificação. A nota reflete a percepção de especialistas em 2018 e é aplicada a
+    todas as eleições da legenda.`;
+}
+
+function blocoEspectro(p) {
+  const cls = p.cands.map((c) => ({ c, r: regraPartido(c.sigla, c.ano) }));
+  const com = cls.filter((x) => x.r);
+  if (!com.length) return "";
+  const media = com.reduce((s, x) => s + x.r[3], 0) / com.length;
+  const porLegenda = new Map();
+  for (const { c, r } of com) {
+    const e = porLegenda.get(c.sigla) || { sigla: c.sigla, nota: r[3], n: 0 };
+    e.n++; porLegenda.set(c.sigla, e);
+  }
+  const semClass = cls.length - com.length;
+  return `<div class="bloco">
+    <h3>Espectro das legendas</h3>
+    <p class="espectro-resumo">Média das legendas pelas quais concorreu: <strong>${fmtNota(media)}</strong>
+      — faixa <strong>${esc(faixaDe(media))}</strong> na classificação acadêmica de referência.</p>
+    ${reguaEspectro([...[...porLegenda.values()].map((e) => ({ nota: e.nota, rotulo: e.sigla })), { nota: media, rotulo: "Média", principal: true }])}
+    <div class="partidos espectro-legendas">${[...porLegenda.values()].sort((a, b) => a.nota - b.nota).map((e) =>
+      `<span class="partido"><strong>${esc(e.sigla)}</strong> <small>${fmtNota(e.nota)} · ${esc(faixaDe(e.nota))} · ${e.n} candidatura${e.n > 1 ? "s" : ""}</small></span>`).join("")}</div>
+    <p class="nota">Considera ${com.length} de ${cls.length} candidaturas${semClass ? ` (${semClass} por legendas sem classificação no estudo)` : ""}.
+      Descreve apenas as legendas pelas quais a pessoa concorreu — não é uma avaliação das posições da pessoa. ${citacaoEspectro()}
+      <a href="#partidos=1">Ver tabela de partidos</a>.</p>
+  </div>`;
+}
+
+// ---------- Página de partidos ----------
+
+async function mostrarPartidos() {
+  mostrarInicio(false);
+  $("#ficha").innerHTML = "";
+  $("#resultados").innerHTML = "";
+  setStatus("Carregando partidos…", { carregando: true });
+  let dados;
+  try { dados = await getJson("data/partidos.json"); } catch (e) { return setStatus("Não foi possível carregar a tabela de partidos.", { erro: true }); }
+  setStatus("");
+  const hist = new Map(dados.historico.map((h) => [siglaNorm(h.sigla), h]));
+  const anoAtual = Math.max(...META.anos);
+  const registrados = dados.tse.partidos.map((t) => ({ ...t, r: regraPartido(t.sigla, anoAtual), h: hist.get(siglaNorm(t.sigla)) }));
+  const siglasTse = new Set(registrados.map((t) => siglaNorm(t.sigla)));
+  const antigas = dados.historico.filter((h) => !siglasTse.has(siglaNorm(h.sigla)))
+    .map((h) => ({ ...h, r: regraPartido(h.sigla, h.ultimo) }))
+    .sort((a, b) => b.ultimo - a.ultimo || a.sigla.localeCompare(b.sigla));
+  const ordem = (a, b) => (a.r ? a.r[3] : 99) - (b.r ? b.r[3] : 99) || a.sigla.localeCompare(b.sigla);
+  const mini = (r) => r ? `<div class="mini-regua" title="${fmtNota(r[3])}"><i style="left:${r[3] * 10}%"></i></div>` : "";
+  const classe = (r) => r ? `<strong>${fmtNota(r[3])}</strong> · ${esc(faixaDe(r[3]))}${r[4] ? `<div class="muted">${esc(r[4])}</div>` : ""}`
+    : `<span class="muted">Sem classificação no estudo</span>`;
+  const n = (x) => (x || 0).toLocaleString("pt-BR");
+
+  $("#partidos").innerHTML = `
+    <button class="voltar" id="voltar-p">← voltar</button>
+    <div class="bloco">
+      <h3>Partidos registrados no TSE (${registrados.length})</h3>
+      ${reguaEspectro(registrados.filter((t) => t.r).map((t) => ({ nota: t.r[3], rotulo: t.sigla })))}
+      <div class="tabela-wrap"><table class="tabela-partidos">
+        <thead><tr><th>Nº</th><th>Sigla</th><th>Nome</th><th>Registro</th><th>Site oficial</th><th>Espectro</th><th></th>
+          <th class="num">Candidaturas</th><th class="num">Eleitos</th></tr></thead>
+        <tbody>${registrados.sort(ordem).map((t) => `<tr>
+          <td>${esc(t.numero)}</td><td><strong>${esc(t.sigla)}</strong></td><td>${esc(t.nome)}</td><td>${esc(t.deferimento)}</td>
+          <td>${t.site ? `<a href="${esc(t.site)}" target="_blank" rel="noopener">${esc(t.site.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, ""))}</a>` : `<span class="muted">—</span>`}</td>
+          <td class="espectro-cel">${classe(t.r)}</td><td>${mini(t.r)}</td>
+          <td class="num">${n(t.h?.candidaturas)}</td><td class="num">${n(t.h?.eleitos)}</td></tr>`).join("")}</tbody>
+      </table></div>
+      <p class="nota">Fonte: ${esc(dados.tse.fonte)}. ${esc(dados.tse.observacao || "")} Candidaturas e eleitos: dados do TSE de 1994 a 2026 nesta base,
+        pela sigla atual.</p>
+    </div>
+    <div class="bloco">
+      <h3>Legendas extintas, renomeadas ou incorporadas (${antigas.length})</h3>
+      <div class="tabela-wrap"><table class="tabela-partidos">
+        <thead><tr><th>Sigla</th><th>Nome</th><th>Período nos dados</th><th>Espectro</th><th></th><th class="num">Candidaturas</th><th class="num">Eleitos</th></tr></thead>
+        <tbody>${antigas.map((h) => `<tr><td><strong>${esc(h.sigla)}</strong></td><td>${esc(cap(h.nome))}</td>
+          <td>${h.primeiro === h.ultimo ? h.primeiro : `${h.primeiro}–${h.ultimo}`}</td><td class="espectro-cel">${classe(h.r)}</td><td>${mini(h.r)}</td>
+          <td class="num">${n(h.candidaturas)}</td><td class="num">${n(h.eleitos)}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </div>
+    <div class="bloco"><h3>Metodologia da classificação ideológica</h3><p class="nota" style="font-size:.92rem">${citacaoEspectro()}
+      Faixas: ${(META.espectro?.faixas || []).map(([lim, nome], i, arr) => `${nome} (${i ? fmtNota(arr[i - 1][0]) : "0"}–${fmtNota(lim)})`).join("; ")}.
+      A classificação é de responsabilidade dos autores do estudo citado e é apresentada apenas como referência.</p></div>`;
+  $("#voltar-p").onclick = () => history.back();
+  window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
+}
+
 // ---------- Utilidades de apresentação ----------
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -280,43 +393,196 @@ function mostrarInicio(visivel) {
   $("#inicio").hidden = !visivel;
 }
 
-// ---------- Busca ----------
+// ---------- Filtros (estado, ano, cargo, município, eleitos) ----------
 
-async function executarBusca(q) {
+const UFS = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR",
+  "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"];
+const POR_PAGINA = 50;
+const LIMITE_FILTRO_NOME = 300; // sem ano+UF, o filtro por nome examina os N resultados mais relevantes
+
+// Cargo exibido no filtro -> códigos da tabela (junta "1º SUPLENTE" e "1º SUPLENTE SENADOR").
+let CARGOS = null; // Map chave -> { rotulo, codigos:Set }
+function cargosFiltro() {
+  if (CARGOS) return CARGOS;
+  CARGOS = new Map();
+  META.tabelas.cargo.forEach((nome, cod) => {
+    if (!nome) return;
+    const n = normaliza(nome);
+    const chave = n.includes("SUPLENTE") ? (nome.trim().startsWith("2") ? "2 SUPLENTE" : "1 SUPLENTE") : n;
+    const rotulo = chave === "1 SUPLENTE" ? "1º Suplente de senador" : chave === "2 SUPLENTE" ? "2º Suplente de senador" : cap(nome);
+    if (!CARGOS.has(chave)) CARGOS.set(chave, { rotulo, codigos: new Set() });
+    CARGOS.get(chave).codigos.add(cod);
+  });
+  return CARGOS;
+}
+const ORDEM_CARGOS = ["PRESIDENTE", "VICE PRESIDENTE", "GOVERNADOR", "VICE GOVERNADOR", "SENADOR", "1 SUPLENTE", "2 SUPLENTE",
+  "DEPUTADO FEDERAL", "DEPUTADO ESTADUAL", "DEPUTADO DISTRITAL", "PREFEITO", "VICE PREFEITO", "VEREADOR"];
+
+const eleitoRes = (codRes) => /^ELEITO|^M[EÉ]DIA$/.test(META.tabelas.resultado[codRes] || "");
+
+function lerFiltros() {
+  return {
+    uf: $("#f-uf").value, ano: $("#f-ano").value, cargo: $("#f-cargo").value,
+    mun: $("#f-uf").value ? $("#f-mun").value : "", eleitos: $("#f-eleitos").checked ? "1" : "",
+  };
+}
+const temFiltro = (f) => !!(f.uf || f.ano || f.cargo || f.mun || f.eleitos);
+
+function preencherFiltros() {
+  $("#f-uf").insertAdjacentHTML("beforeend", `<option value="BR">Brasil (presidente)</option>` + UFS.map((u) => `<option>${u}</option>`).join(""));
+  $("#f-ano").insertAdjacentHTML("beforeend", [...META.anos].reverse().map((a) => `<option>${a}</option>`).join(""));
+  const c = cargosFiltro();
+  const chaves = [...c.keys()].sort((a, b) => (ORDEM_CARGOS.indexOf(a) + 1 || 99) - (ORDEM_CARGOS.indexOf(b) + 1 || 99));
+  $("#f-cargo").insertAdjacentHTML("beforeend", chaves.map((k) => `<option value="${esc(k)}">${esc(c.get(k).rotulo)}</option>`).join(""));
+  $("#f-uf").addEventListener("change", () => preencherMunicipios($("#f-uf").value));
+  $("#f-limpar").addEventListener("click", () => { aplicarFiltrosNaTela({}); });
+}
+
+function preencherMunicipios(uf, selecionado = "") {
+  const sel = $("#f-mun");
+  const itens = uf && uf !== "BR"
+    ? META.tabelas.ue.map((v, cod) => [cod, v]).filter(([, v]) => v.startsWith(uf + "|")).map(([cod, v]) => [cod, v.split("|")[1]])
+      .filter(([, n]) => n && normaliza(n) !== normaliza(uf))
+    : [];
+  // Agrupa grafias iguais (o TSE às vezes grava o mesmo município com e sem acento)
+  const porNome = new Map();
+  for (const [cod, n] of itens) { const k = normaliza(n); if (!porNome.has(k)) porNome.set(k, { nome: n, cods: [] }); porNome.get(k).cods.push(cod); }
+  const ordenados = [...porNome.values()].sort((a, b) => normaliza(a.nome).localeCompare(normaliza(b.nome)));
+  sel.innerHTML = `<option value="">Município: todos</option>` + ordenados.map((m) => `<option value="${m.cods.join(",")}">${esc(cap(m.nome))}</option>`).join("");
+  sel.hidden = !ordenados.length;
+  sel.value = selecionado;
+}
+
+function aplicarFiltrosNaTela(f) {
+  $("#f-uf").value = f.uf || "";
+  preencherMunicipios(f.uf || "", f.mun || "");
+  $("#f-ano").value = f.ano || "";
+  $("#f-cargo").value = f.cargo || "";
+  $("#f-eleitos").checked = f.eleitos === "1";
+}
+
+// Candidaturas (de um ano/UF) que atendem aos filtros: [{pid, cargo, ue, partido, resultado}]
+async function candidaturasFiltradas(f) {
+  const ufs = f.uf ? [f.uf] : (META.listas[f.ano] || []);
+  const cods = f.cargo ? cargosFiltro().get(f.cargo)?.codigos : null;
+  const muns = f.mun ? new Set(f.mun.split(",").map(Number)) : null;
+  const out = [];
+  for (const uf of ufs) {
+    if (!(META.listas[f.ano] || []).includes(uf)) continue;
+    const lista = await getJson(`data/lista/${f.ano}_${uf}.json`);
+    for (const [cargo, itens] of Object.entries(lista)) {
+      if (cods && !cods.has(+cargo)) continue;
+      for (const [pid, ue, partido, resultado] of itens) {
+        if (muns && !muns.has(ue)) continue;
+        if (f.eleitos && !eleitoRes(resultado)) continue;
+        out.push({ pid, cargo: +cargo, ue, partido, resultado });
+      }
+    }
+  }
+  return out.sort((a, b) => a.pid - b.pid);
+}
+
+// A candidatura de uma pessoa atende aos filtros? (usado quando não há ano+UF para usar os índices)
+function candidaturaAtende(c, f) {
+  if (f.ano && String(c.ano) !== f.ano) return false;
+  if (f.uf && (c.uf || "BR") !== f.uf) return false;
+  if (f.cargo && !cargosFiltro().get(f.cargo)?.codigos.has(c.cargoCod)) return false;
+  if (f.mun && !f.mun.split(",").map(Number).includes(c.ueCod)) return false;
+  if (f.eleitos && !c.eleito) return false;
+  return true;
+}
+
+function descreverFiltros(f) {
+  const partes = [];
+  if (f.cargo) partes.push(cargosFiltro().get(f.cargo)?.rotulo);
+  if (f.eleitos) partes.push("eleitos");
+  if (f.mun) partes.push(cap(META.tabelas.ue[+f.mun.split(",")[0]]?.split("|")[1] || ""));
+  if (f.uf) partes.push(f.uf === "BR" ? "Brasil" : f.uf);
+  if (f.ano) partes.push(f.ano);
+  return partes.filter(Boolean).join(" · ");
+}
+
+// ---------- Consulta ----------
+
+async function consultar(q, f, pg = 1) {
   mostrarInicio(false);
   $("#ficha").innerHTML = "";
+  $("#partidos").innerHTML = "";
   $("#resultados").innerHTML = "";
   $("#resultados").hidden = false;
   $("#q").value = q;
+  aplicarFiltrosNaTela(f);
   const tk = tokens(normaliza(q));
-  if (!tk.length) return setStatus("Digite um nome para buscar.");
+  if (!tk.length && !temFiltro(f)) return setStatus("Digite um nome ou escolha filtros para consultar.");
   setStatus("Consultando…", { carregando: true });
   try {
-    const r = await localizar(tk);
-    if (r.muitos) {
-      return setStatus("Muitas pessoas com esse nome. Digite o nome mais completo (ex.: nome + sobrenomes).", { erro: true });
-    }
-    if (!r.ids.length) {
-      return setStatus("Nenhuma candidatura encontrada para esse nome. Confira a grafia ou tente o nome completo.");
-    }
-    const pessoas = await Promise.all(r.ids.slice(0, MAX_RESULTADOS).map(pessoa));
-    const qJunto = tk.join(" ");
-    // Nome (ou nome de urna) idêntico ao buscado vem primeiro; o resto mantém a
-    // ordem de relevância do índice (sort é estável).
-    const exato = (p) => [p.nome, ...p.urnas].some((n) => tokens(normaliza(n)).join(" ") === qJunto) ? 1 : 0;
-    pessoas.sort((a, b) => exato(b) - exato(a));
-    if (pessoas.length === 1) return mostrarFicha(pessoas[0].pid, true);
-    const extra = r.ids.length > MAX_RESULTADOS ? ` Mostrando as ${MAX_RESULTADOS} mais relevantes — refine a busca para ver outras.` : "";
-    setStatus(`${r.ids.length.toLocaleString("pt-BR")} pessoa${r.ids.length > 1 ? "s" : ""} encontrada${r.ids.length > 1 ? "s" : ""}.${extra}`);
-    $("#resultados").innerHTML = `<div class="lista">${pessoas.map(cartao).join("")}</div>`;
-    ativarFotos($("#resultados"));
+    if (tk.length) return await consultarPorNome(q, tk, f);
+    return await listarPorFiltro(f, pg);
   } catch (e) {
     console.error(e);
     setStatus("Não foi possível carregar os dados. Tente novamente.", { erro: true });
   }
 }
 
-function cartao(p, i) {
+async function consultarPorNome(q, tk, f) {
+  const r = await localizar(tk);
+  if (r.muitos) {
+    return setStatus(temFiltro(f) && f.ano
+      ? "Nome muito comum para combinar com filtros. Digite o nome mais completo ou consulte só pelos filtros (sem nome)."
+      : "Muitas pessoas com esse nome. Digite o nome mais completo (ex.: nome + sobrenomes).", { erro: true });
+  }
+  let ids = r.ids;
+  let aviso = "";
+  if (temFiltro(f)) {
+    if (f.ano && (f.uf || META.listas[f.ano]?.length)) {
+      const permitidos = new Set((await candidaturasFiltradas(f)).map((c) => c.pid));
+      ids = ids.filter((pid) => permitidos.has(pid));
+    } else {
+      if (ids.length > LIMITE_FILTRO_NOME) aviso = ` Filtro aplicado aos ${LIMITE_FILTRO_NOME} resultados mais relevantes; escolha o ano para filtrar todos.`;
+      const ps = await Promise.all(ids.slice(0, LIMITE_FILTRO_NOME).map(pessoa));
+      ids = ps.filter((p) => p.cands.some((c) => candidaturaAtende(c, f))).map((p) => p.pid);
+    }
+  }
+  if (!ids.length) {
+    return setStatus(temFiltro(f) ? `Nenhuma candidatura encontrada para esse nome com os filtros (${descreverFiltros(f)}).`
+      : "Nenhuma candidatura encontrada para esse nome. Confira a grafia ou tente o nome completo.");
+  }
+  const pessoas = await Promise.all(ids.slice(0, MAX_RESULTADOS).map(pessoa));
+  const qJunto = tk.join(" ");
+  // Nome (ou nome de urna) idêntico ao buscado vem primeiro; o resto mantém a
+  // ordem de relevância do índice (sort é estável).
+  const exato = (p) => [p.nome, ...p.urnas].some((n) => tokens(normaliza(n)).join(" ") === qJunto) ? 1 : 0;
+  pessoas.sort((a, b) => exato(b) - exato(a));
+  if (pessoas.length === 1 && !temFiltro(f)) return mostrarFicha(pessoas[0].pid, true);
+  const extra = ids.length > MAX_RESULTADOS ? ` Mostrando as ${MAX_RESULTADOS} mais relevantes — refine a busca para ver outras.` : "";
+  const filtroTxt = temFiltro(f) ? ` (${descreverFiltros(f)})` : "";
+  setStatus(`${ids.length.toLocaleString("pt-BR")} pessoa${ids.length > 1 ? "s" : ""} encontrada${ids.length > 1 ? "s" : ""}${filtroTxt}.${extra}${aviso}`);
+  const ctx = temFiltro(f) ? (p) => p.cands.filter((c) => candidaturaAtende(c, f)).pop() : () => null;
+  $("#resultados").innerHTML = `<div class="lista">${pessoas.map((p, i) => cartao(p, i, ctx(p))).join("")}</div>`;
+  ativarFotos($("#resultados"));
+}
+
+async function listarPorFiltro(f, pg) {
+  if (!f.ano) return setStatus("Para consultar sem nome, escolha pelo menos o ano da eleição (e, de preferência, o estado).", { erro: true });
+  if (!f.uf && !f.cargo) return setStatus("Escolha também o estado ou o cargo para consultar sem nome.", { erro: true });
+  const todas = await candidaturasFiltradas(f);
+  if (!todas.length) return setStatus(`Nenhuma candidatura encontrada (${descreverFiltros(f)}).`);
+  const paginas = Math.ceil(todas.length / POR_PAGINA);
+  pg = Math.min(Math.max(1, pg), paginas);
+  const pagina = todas.slice((pg - 1) * POR_PAGINA, pg * POR_PAGINA);
+  const pessoas = await Promise.all(pagina.map((c) => pessoa(c.pid)));
+  setStatus(`${todas.length.toLocaleString("pt-BR")} candidatura${todas.length > 1 ? "s" : ""} (${descreverFiltros(f)}) — página ${pg} de ${paginas}, em ordem alfabética.`);
+  const ctx = (p, k) => p.cands.find((c) => String(c.ano) === f.ano && c.cargoCod === pagina[k].cargo && c.ueCod === pagina[k].ue) || null;
+  const nav = paginas > 1 ? `<nav class="paginacao" aria-label="Páginas">
+      <button type="button" data-pg="${pg - 1}" ${pg <= 1 ? "disabled" : ""}>← Anterior</button>
+      <span>Página ${pg} de ${paginas}</span>
+      <button type="button" data-pg="${pg + 1}" ${pg >= paginas ? "disabled" : ""}>Próxima →</button></nav>` : "";
+  $("#resultados").innerHTML = `${nav}<div class="lista">${pessoas.map((p, k) => cartao(p, k, ctx(p, k))).join("")}</div>${nav}`;
+  ativarFotos($("#resultados"));
+}
+
+// ctx (opcional): a candidatura que motivou o resultado — exibida em destaque no cartão.
+function cartao(p, i, ctx = null) {
   const r = resumo(p);
   const urna = p.urnas[0] && normaliza(p.urnas[0]) !== normaliza(p.nome) ? ` · urna: “${esc(p.urnas[0])}”` : "";
   const selo = r.eleicoes.length
@@ -324,10 +590,13 @@ function cartao(p, i) {
     : `<span class="selo neutro">nunca eleito</span>`;
   const periodo = r.de === r.ate ? r.de : `${r.de}–${r.ate}`;
   const partidos = [...new Set(r.partidos.map((x) => x.sigla))].join(", ");
+  const destaque = ctx ? `<div class="linha contexto"><strong>${ctx.ano} · ${esc(cap(ctx.cargo))}</strong> · ${esc(localTexto(ctx))} · ${esc(ctx.sigla)}
+      ${ctx.resultado ? ` · ${ctx.eleito ? `<span class="ok-txt">${esc(cap(ctx.resultado))}</span>` : esc(cap(ctx.resultado))}` : ""}</div>` : "";
   return `<button class="cartao" data-pid="${p.pid}" style="animation-delay:${Math.min(i, 12) * 25}ms">
     ${avatar(p)}
     <span class="info">
       <h3>${esc(cap(p.nome))}${selo}${p.sancoes.length ? `<span class="selo alerta">⚠ sanção registrada</span>` : ""}</h3>
+      ${destaque}
       <div class="linha">${p.cands.length} candidatura${p.cands.length > 1 ? "s" : ""} (${periodo})${urna}</div>
       <div class="linha">${esc(r.ufs.join(", ") || "Brasil")} · ${esc(partidos)}${p.anoNasc ? ` · nasc. ${p.anoNasc}` : ""}${p.cpf ? ` · CPF ${esc(p.cpf)}` : ""}</div>
     </span>
@@ -418,6 +687,8 @@ async function mostrarFicha(pid, unica = false) {
       <div class="partidos">${r.partidos.map((x, i) => `${i ? `<span class="seta-p">→</span>` : ""}<span class="partido" title="${esc(x.nome)}"><i style="background:${corPartido(x.sigla)}"></i><strong>${esc(x.sigla)}</strong> <small>${x.de === x.ate ? x.de : `${x.de}–${x.ate}`}</small></span>`).join("")}</div>
       <p class="nota">Partido pelo qual concorreu em cada eleição, em ordem cronológica${trocas ? ` — ${trocas} troca${trocas > 1 ? "s" : ""} de partido` : ""}. As coligações aparecem na tabela de candidaturas.</p>
     </div>
+
+    ${blocoEspectro(p)}
 
     ${comp.length ? `<div class="bloco">
       <h3>Já compôs chapa com</h3>
@@ -637,23 +908,38 @@ function graficoBens(cands, modo) {
 
 // ---------- Navegação (estado na URL) ----------
 
+const CAMPOS_FILTRO = ["uf", "ano", "cargo", "mun", "eleitos"];
+
 function lerHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  return { q: h.get("q") || "", p: h.get("p") };
+  const f = Object.fromEntries(CAMPOS_FILTRO.map((k) => [k, h.get(k) || ""]));
+  return { q: h.get("q") || "", p: h.get("p"), pg: +(h.get("pg") || 1), partidos: h.has("partidos"), f };
+}
+
+// Monta o hash de uma consulta (omitindo campos vazios)
+function hashConsulta(q, f, extra = {}) {
+  const h = new URLSearchParams();
+  if (q) h.set("q", q);
+  for (const k of CAMPOS_FILTRO) if (f[k]) h.set(k, f[k]);
+  for (const [k, v] of Object.entries(extra)) if (v !== undefined && v !== null && v !== "") h.set(k, v);
+  return h.toString();
 }
 
 async function rotear() {
-  const { q, p } = lerHash();
+  const { q, p, pg, partidos, f } = lerHash();
+  $("#partidos").innerHTML = "";
+  if (partidos) return mostrarPartidos();
   if (p !== null) {
     if (q) $("#q").value = q;
     $("#resultados").hidden = true;
     return mostrarFicha(Number(p));
   }
   $("#ficha").innerHTML = "";
-  if (q) {
-    if ($("#q").dataset.ultima !== q || !$("#resultados").innerHTML) {
-      $("#q").dataset.ultima = q;
-      await executarBusca(q);
+  if (q || temFiltro(f)) {
+    const chave = hashConsulta(q, f, { pg: pg > 1 ? pg : "" });
+    if ($("#q").dataset.ultima !== chave || !$("#resultados").innerHTML) {
+      $("#q").dataset.ultima = chave;
+      await consultar(q, f, pg);
     } else {
       mostrarInicio(false);
       $("#resultados").hidden = false;
@@ -662,6 +948,7 @@ async function rotear() {
   } else {
     $("#resultados").innerHTML = "";
     $("#q").value = "";
+    aplicarFiltrosNaTela({});
     setStatus("");
     mostrarInicio(true);
   }
@@ -677,17 +964,27 @@ async function iniciar() {
   } catch (e) {
     return setStatus("Os dados ainda não foram gerados. Rode o workflow de build no GitHub Actions.", { erro: true });
   }
+  preencherFiltros();
   $("#busca").addEventListener("submit", (ev) => {
     ev.preventDefault();
     const q = $("#q").value.trim();
-    if (q) location.hash = new URLSearchParams({ q }).toString();
+    const f = lerFiltros();
+    if (q || temFiltro(f)) location.hash = hashConsulta(q, f);
+    else setStatus("Digite um nome ou escolha filtros para consultar.");
   });
   $("#resultados").addEventListener("click", (ev) => {
+    const pgBtn = ev.target.closest(".paginacao button[data-pg]");
+    if (pgBtn) {
+      const { q, f } = lerHash();
+      location.hash = hashConsulta(q, f, { pg: pgBtn.dataset.pg > 1 ? pgBtn.dataset.pg : "" });
+      window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
+      return;
+    }
     const b = ev.target.closest(".cartao");
     if (!b) return;
     $("#status").dataset.anterior = $("#status").textContent;
-    const { q } = lerHash();
-    location.hash = new URLSearchParams({ q, p: b.dataset.pid }).toString();
+    const { q, f, pg } = lerHash();
+    location.hash = hashConsulta(q, f, { pg: pg > 1 ? pg : "", p: b.dataset.pid });
   });
   $("#home").addEventListener("click", (ev) => { ev.preventDefault(); location.hash = ""; $("#q").focus(); });
   window.addEventListener("hashchange", rotear);

@@ -49,12 +49,22 @@
                  placeholder="Nome completo ou nome de urna" aria-label="Nome">
         </label>
         <button type="submit">Consultar</button>
+        <div class="filtros" role="group" aria-label="Filtros">
+          <select id="f-uf" aria-label="Estado"><option value="">Estado: todos</option></select>
+          <select id="f-ano" aria-label="Ano da eleição"><option value="">Ano: todos</option></select>
+          <select id="f-cargo" aria-label="Cargo"><option value="">Cargo: todos</option></select>
+          <select id="f-mun" aria-label="Município" hidden><option value="">Município: todos</option></select>
+          <label class="check"><input type="checkbox" id="f-eleitos"> Somente eleitos</label>
+          <button type="button" id="f-limpar" class="limpar">Limpar filtros</button>
+        </div>
       </form>
       <p class="exemplos">Experimente:
         <a href="#q=Luiz Inácio Lula da Silva">Lula</a>
         <a href="#q=Jair Messias Bolsonaro">Jair Bolsonaro</a>
         <a href="#q=Simone Tebet">Simone Tebet</a>
         <a href="#q=Tiririca">Tiririca</a>
+        <a href="#ano=2024&uf=BA&cargo=PREFEITO&eleitos=1">Prefeitos eleitos na Bahia (2024)</a>
+        <a href="#partidos=1" class="destaque-link">Tabela de partidos →</a>
       </p>
       <dl class="numeros">
         <div><dt>pessoas</dt><dd id="n-pessoas">—</dd></div>
@@ -68,6 +78,7 @@
     <div id="status" class="status" aria-live="polite"></div>
     <section id="resultados"></section>
     <section id="ficha"></section>
+    <section id="partidos"></section>
 
     <section id="inicio" class="inicio">
       <div class="recursos">
@@ -91,6 +102,8 @@
         <strong>Como a busca funciona.</strong> Acentos e maiúsculas não importam. Use o nome completo
         (“Jair Messias Bolsonaro”), o primeiro nome com um sobrenome (“Jair Bolsonaro”) ou o nome de urna (“Tiririca”).
         Homônimos são diferenciados pelo ano de nascimento e pelo CPF parcialmente mascarado.
+        Também é possível consultar sem nome, escolhendo <strong>ano e estado</strong> (e, se quiser, cargo, município e
+        “somente eleitos”) — por exemplo, todos os vereadores eleitos em Salvador em 2024.
       </div>
     </section>
   </main>
@@ -109,6 +122,7 @@
           homônimos podem aparecer separados ou, raramente, misturados. “Eleito” reflete o resultado da eleição e não garante posse
           ou mandato completo. Valores de bens são declarados; quando indicado, corrigidos pelo IPCA. CPF exibido de forma mascarada.
           Fotos carregadas diretamente do DivulgaCandContas (TSE), da candidatura mais recente disponível (2004 em diante).</p>
+        <p><a href="#partidos=1">Tabela de partidos e metodologia da classificação ideológica</a></p>
       </div>
     </div>
   </footer>

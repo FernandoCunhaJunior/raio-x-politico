@@ -1,0 +1,64 @@
+# Classificação ideológica das legendas usada no site.
+# Fonte: BOLOGNESI, B.; RIBEIRO, E.; CODATO, A. Uma Nova Classificação Ideológica dos Partidos Políticos
+# Brasileiros. Dados, v. 66, n. 2, e20210164, 2023. https://doi.org/10.1590/dados.2023.66.2.303
+# Survey com 519 cientistas políticos (2018), escala 0 (esquerda) a 10 (direita). "nota" = média da Tabela 1.
+#
+# Regras deste arquivo:
+# - Só entram legendas avaliadas no estudo e suas NOVAS DENOMINAÇÕES (mesmo partido, novo nome/sigla).
+# - Fusões que criaram partidos novos (União Brasil, PRD) e legendas extintas não avaliadas ficam SEM classificação.
+# - ano_inicio: a partir de quando a sigla corresponde ao partido avaliado (evita confundir siglas reaproveitadas,
+#   ex.: PL antigo x PL atual, PSD antigo x PSD de 2011, PP de 1993 x Progressistas).
+# - A nota foi medida em 2018 e é aplicada a todas as eleições da legenda: é uma aproximação.
+sigla;ano_inicio;sigla_estudo;nota;observacao
+PSTU;0;PSTU;0,51;
+PCO;0;PCO;0,61;
+PCB;0;PCB;0,91;
+PSOL;0;PSOL;1,28;
+PCDOB;0;PCdoB;1,92;
+PT;0;PT;2,97;
+PDT;0;PDT;3,92;
+PSB;0;PSB;4,05;
+REDE;0;Rede;4,77;
+PPS;0;PPS;4,92;
+CIDADANIA;0;PPS;4,92;Nova denominação do PPS (2019)
+PV;0;PV;5,29;
+PTB;0;PTB;6,1;Incorporado ao PRD em 2023
+PTDOB;0;Avante;6,32;Denominação anterior do Avante
+AVANTE;0;Avante;6,32;
+SD;0;SDD;6,5;Solidariedade
+SDD;0;SDD;6,5;Solidariedade
+SOLIDARIEDADE;0;SDD;6,5;
+PMN;0;PMN;6,88;
+MOBILIZA;0;PMN;6,88;Nova denominação do PMN
+PMB;0;PMB;6,9;
+DEMOCRATA;0;PMB;6,9;Nova denominação do PMB
+PHS;0;PHS;6,96;Incorporado ao Podemos em 2019
+PMDB;0;MDB;7,01;Denominação anterior do MDB
+MDB;0;MDB;7,01;
+PSD;2011;PSD;7,09;PSD fundado em 2011 (não confundir com o antigo PSD, extinto em 2003)
+PSDB;0;PSDB;7,11;
+PTN;0;Podemos;7,24;Denominação anterior do Podemos
+PODE;0;Podemos;7,24;
+PPL;0;PPL;7,27;Incorporado ao PCdoB em 2019
+PRTB;0;PRTB;7,45;
+PROS;0;Pros;7,47;Incorporado ao Solidariedade em 2023
+PRP;0;PRP;7,59;Incorporado ao Patriota em 2019
+PRB;0;PRB;7,78;Denominação anterior do Republicanos
+REPUBLICANOS;0;PRB;7,78;Nova denominação do PRB (2019)
+PR;0;PR;7,78;Denominação anterior do PL atual
+PL;2019;PR;7,78;Nova denominação do PR (2019); o PL anterior a 2006 era outro partido
+PTC;0;PTC;7,86;Denominação anterior do Agir
+AGIR;0;PTC;7,86;Nova denominação do PTC (2022)
+PSDC;0;DC;8,11;Denominação anterior da Democracia Cristã
+DC;0;DC;8,11;
+PSL;0;PSL;8,11;Fundido ao DEM para formar o União Brasil (2022)
+NOVO;0;Novo;8,13;
+PPB;1995;Progressistas;8,2;Denominação anterior do Progressistas (1995-2003)
+PP;2003;Progressistas;8,2;Progressistas
+PROGRESSISTAS;0;Progressistas;8,2;
+PSC;0;PSC;8,33;Incorporado ao Podemos em 2023
+PEN;0;Patriota;8,55;Denominação anterior do Patriota
+PATRI;0;Patriota;8,55;
+PATRIOTA;0;Patriota;8,55;Fundido ao PTB para formar o PRD (2023)
+PFL;0;DEM;8,57;Denominação anterior do DEM
+DEM;0;DEM;8,57;Fundido ao PSL para formar o União Brasil (2022)

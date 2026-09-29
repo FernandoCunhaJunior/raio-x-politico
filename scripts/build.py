@@ -565,6 +565,58 @@ def percentis_eleitos(df, foi_eleito):
     return out
 
 
+def sigla_norm(s):
+    return re.sub(r"\s+", "", s or "").upper()
+
+
+def carregar_classificacao_partidos():
+    """Regras [sigla normalizada, ano_inicio, sigla no estudo, nota] de scripts/partidos_classificacao.csv."""
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "partidos_classificacao.csv")
+    t = pd.read_csv(caminho, sep=";", dtype=str, comment="#", keep_default_na=False)
+    return [[sigla_norm(r.sigla), int(r.ano_inicio or 0), r.sigla_estudo, float(r.nota.replace(",", ".")), r.observacao]
+            for r in t.itertuples()]
+
+
+def gerar_partidos(col, tab, out):
+    """data/partidos.json: partidos registrados no TSE + todas as legendas presentes nos dados, com estatísticas."""
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "partidos_tse.json")
+    with open(caminho, encoding="utf-8") as f:
+        tse = json.load(f)
+    eleito = np.array([bool(re.match(r"ELEITO|MEDIA$", normaliza(r))) for r in tab["resultado"].itens])
+    siglas = np.array([p.split("|")[0] for p in tab["partido"].itens], dtype=object)[col["partido"]]
+    nomes = np.array([p.split("|")[-1] for p in tab["partido"].itens], dtype=object)[col["partido"]]
+    d = pd.DataFrame({"sigla": siglas, "nome": nomes, "ano": col["ano"], "eleito": eleito[col["resultado"]]})
+    d = d[d["sigla"] != ""]
+    d["norm"] = d["sigla"].map(sigla_norm)
+    hist = []
+    for norm, g in d.groupby("norm"):
+        hist.append({
+            "sigla": g["sigla"].mode().iat[0], "nome": g.sort_values("ano")["nome"].iat[-1],
+            "primeiro": int(g["ano"].min()), "ultimo": int(g["ano"].max()),
+            "candidaturas": int(len(g)), "eleitos": int(g["eleito"].sum()),
+        })
+    with open(os.path.join(out, "partidos.json"), "w", encoding="utf-8") as f:
+        json.dump({"tse": tse, "historico": hist}, f, ensure_ascii=False, separators=(",", ":"))
+    log(f"partidos: {len(tse['partidos'])} registrados no TSE, {len(hist)} legendas nos dados")
+
+
+def gerar_listas(col, out):
+    """data/lista/AAAA_UF.json: {cargo: [[pid, local, partido, resultado], ...]} para consultas por filtro."""
+    os.makedirs(os.path.join(out, "lista"), exist_ok=True)
+    grupos = {}
+    for i in range(len(col["pid"])):
+        chave = (int(col["ano"][i]), col["uf"][i] or "BR")
+        grupos.setdefault(chave, {}).setdefault(int(col["cargo"][i]), []).append(
+            [int(col["pid"][i]), int(col["ue"][i]), int(col["partido"][i]), int(col["resultado"][i])])
+    indice = {}
+    for (ano, uf), por_cargo in grupos.items():
+        with open(os.path.join(out, "lista", f"{ano}_{uf}.json"), "w", encoding="utf-8") as f:
+            json.dump(por_cargo, f, separators=(",", ":"))
+        indice.setdefault(str(ano), []).append(uf)
+    log(f"listas por eleição/UF: {len(grupos)} arquivos")
+    return {a: sorted(u) for a, u in indice.items()}
+
+
 def percentis_verba_publica(df):
     """Percentis 0..100 da verba pública (fundo eleitoral + partidário) recebida por candidatos, por ano e cargo."""
     ok = ~np.isnan(df["rec_total"].to_numpy())
@@ -737,6 +789,8 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
         with open(os.path.join(out, "idx", f"{i:03x}.json"), "w", encoding="utf-8") as f:
             json.dump(balde, f, separators=(",", ":"))
 
+    gerar_partidos(col, tab, out)
+    listas = gerar_listas(col, out)
     anos = sorted(int(a) for a in np.unique(col["ano"]))
     meta = {
         "gerado_em": time.strftime("%Y-%m-%d"),
@@ -754,6 +808,16 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
         "ipca": carregar_ipca(),
         "sancoes_fontes": fontes_sancoes,  # {"CEIS": "AAAAMMDD", ...}
         "fotos_eleicoes": [e for _, _, e in ELEICOES_FOTO],  # índice usado nas referências de foto
+        "listas": listas,  # {"2024": ["AC", "AL", ...]} — arquivos data/lista/AAAA_UF.json
+        "espectro": {
+            "fonte": "Bolognesi, B.; Ribeiro, E.; Codato, A. Uma Nova Classificação Ideológica dos Partidos "
+                     "Políticos Brasileiros. Dados, v. 66, n. 2, 2023.",
+            "doi": "https://doi.org/10.1590/dados.2023.66.2.303",
+            # Faixas definidas pelos autores (limite superior de cada categoria)
+            "faixas": [[1.5, "Extrema-esquerda"], [3.0, "Esquerda"], [4.49, "Centro-esquerda"], [5.5, "Centro"],
+                       [7.0, "Centro-direita"], [8.5, "Direita"], [10.0, "Extrema-direita"]],
+            "regras": carregar_classificacao_partidos(),
+        },
     }
     with open(os.path.join(out, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, separators=(",", ":"))
