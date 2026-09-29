@@ -265,18 +265,33 @@ function citacaoEspectro() {
     todas as eleições da legenda.`;
 }
 
-function blocoEspectro(p) {
+// Média das notas das legendas pelas quais a pessoa concorreu (null se nenhuma legenda classificada)
+function espectroPessoa(p) {
   const cls = p.cands.map((c) => ({ c, r: regraPartido(c.sigla, c.ano) }));
   const com = cls.filter((x) => x.r);
-  if (!com.length) return "";
+  if (!com.length) return null;
   const media = com.reduce((s, x) => s + x.r[3], 0) / com.length;
+  return { cls, com, media, faixa: faixaDe(media) };
+}
+
+function seloEspectro(p) {
+  const e = espectroPessoa(p);
+  if (!e) return "";
+  return `<button type="button" class="selo espectro-selo" id="ir-espectro" title="Média das legendas pelas quais concorreu, segundo classificação acadêmica">
+    <i style="left:${10 + e.media * 4}px"></i><span>Espectro das legendas: <b>${esc(e.faixa)}</b> (${fmtNota(e.media)})</span><u>ver análise</u></button>`;
+}
+
+function blocoEspectro(p) {
+  const e = espectroPessoa(p);
+  if (!e) return "";
+  const { cls, com, media } = e;
   const porLegenda = new Map();
   for (const { c, r } of com) {
     const e = porLegenda.get(c.sigla) || { sigla: c.sigla, nota: r[3], n: 0 };
     e.n++; porLegenda.set(c.sigla, e);
   }
   const semClass = cls.length - com.length;
-  return `<div class="bloco">
+  return `<div class="bloco" id="espectro">
     <h3>Espectro das legendas</h3>
     <p class="espectro-resumo">Média das legendas pelas quais concorreu: <strong>${fmtNota(media)}</strong>
       — faixa <strong>${esc(faixaDe(media))}</strong> na classificação acadêmica de referência.</p>
@@ -420,45 +435,143 @@ const ORDEM_CARGOS = ["PRESIDENTE", "VICE PRESIDENTE", "GOVERNADOR", "VICE GOVER
 
 const eleitoRes = (codRes) => /^ELEITO|^M[EÉ]DIA$/.test(META.tabelas.resultado[codRes] || "");
 
-function lerFiltros() {
-  return {
-    uf: $("#f-uf").value, ano: $("#f-ano").value, cargo: $("#f-cargo").value,
-    mun: $("#f-uf").value ? $("#f-mun").value : "", eleitos: $("#f-eleitos").checked ? "1" : "",
-  };
-}
 const temFiltro = (f) => !!(f.uf || f.ano || f.cargo || f.mun || f.eleitos);
+const chaveDoCargo = (cod) => [...cargosFiltro()].find(([, v]) => v.codigos.has(+cod))?.[0] || "";
+const NOMES_UF = { AC: "Acre", AL: "Alagoas", AM: "Amazonas", AP: "Amapá", BA: "Bahia", CE: "Ceará", DF: "Distrito Federal",
+  ES: "Espírito Santo", GO: "Goiás", MA: "Maranhão", MG: "Minas Gerais", MS: "Mato Grosso do Sul", MT: "Mato Grosso", PA: "Pará",
+  PB: "Paraíba", PE: "Pernambuco", PI: "Piauí", PR: "Paraná", RJ: "Rio de Janeiro", RN: "Rio Grande do Norte", RO: "Rondônia",
+  RR: "Roraima", RS: "Rio Grande do Sul", SC: "Santa Catarina", SE: "Sergipe", SP: "São Paulo", TO: "Tocantins", BR: "Brasil" };
+const hashExplorar = (f, extra = {}) => "explorar=1" + (hashConsulta("", f, extra) ? "&" + hashConsulta("", f, extra) : "");
 
-function preencherFiltros() {
-  $("#f-uf").insertAdjacentHTML("beforeend", `<option value="BR">Brasil (presidente)</option>` + UFS.map((u) => `<option>${u}</option>`).join(""));
-  $("#f-ano").insertAdjacentHTML("beforeend", [...META.anos].reverse().map((a) => `<option>${a}</option>`).join(""));
-  const c = cargosFiltro();
-  const chaves = [...c.keys()].sort((a, b) => (ORDEM_CARGOS.indexOf(a) + 1 || 99) - (ORDEM_CARGOS.indexOf(b) + 1 || 99));
-  $("#f-cargo").insertAdjacentHTML("beforeend", chaves.map((k) => `<option value="${esc(k)}">${esc(c.get(k).rotulo)}</option>`).join(""));
-  $("#f-uf").addEventListener("change", () => preencherMunicipios($("#f-uf").value));
-  $("#f-limpar").addEventListener("click", () => { aplicarFiltrosNaTela({}); });
+// ---------- Explorar pelo mapa: estado → ano → cargo → candidatos ----------
+
+async function mostrarExplorar(f, pg) {
+  mostrarInicio(false);
+  $("#ficha").innerHTML = "";
+  $("#partidos").innerHTML = "";
+  $("#resultados").innerHTML = "";
+  $("#resultados").hidden = false;
+  setStatus("");
+  const passos = [{ rot: "Brasil", f: {} }];
+  if (f.uf) passos.push({ rot: NOMES_UF[f.uf] || f.uf, f: { uf: f.uf } });
+  if (f.ano) passos.push({ rot: f.ano, f: { uf: f.uf, ano: f.ano } });
+  if (f.cargo) passos.push({ rot: cargosFiltro().get(f.cargo)?.rotulo || f.cargo, f: { uf: f.uf, ano: f.ano, cargo: f.cargo } });
+  const trilha = `<nav class="trilha" aria-label="Etapas">${passos.map((s, i) => i === passos.length - 1
+    ? `<span aria-current="page">${esc(s.rot)}</span>` : `<a href="#${hashExplorar(s.f)}">${esc(s.rot)}</a>`).join('<span class="sep">›</span>')}</nav>`;
+  const etapa = !f.uf ? 1 : !f.ano ? 2 : !f.cargo ? 3 : 4;
+  const titulos = ["Escolha um estado", "Escolha o ano da eleição", "Escolha o cargo", "Candidatos"];
+  const el = $("#explorar");
+  el.innerHTML = `<div class="bloco explorar">
+    <div class="explorar-topo">${trilha}<span class="etapa">Etapa ${etapa} de 4 · ${titulos[etapa - 1]}</span></div>
+    <div id="explorar-corpo"><div class="status"><span class="spinner"></span> Carregando…</div></div></div>`;
+  const corpo = $("#explorar-corpo");
+  try {
+    if (etapa === 1) corpo.innerHTML = await etapaMapa();
+    else if (etapa === 2) corpo.innerHTML = etapaAnos(f.uf);
+    else if (etapa === 3) corpo.innerHTML = await etapaCargos(f);
+    else {
+      corpo.innerHTML = await etapaFiltrosLista(f);
+      ligarFiltrosLista(f);
+      await listarPorFiltro(f, pg);
+    }
+    if (etapa === 1) rotularMapa();
+  } catch (e) {
+    console.error(e);
+    corpo.innerHTML = `<p class="muted">Não foi possível carregar esta etapa. Tente novamente.</p>`;
+  }
+  if (etapa < 4) window.scrollTo({ top: $(".conteudo").offsetTop - 8, behavior: semAnimacao ? "auto" : "smooth" });
 }
 
-function preencherMunicipios(uf, selecionado = "") {
-  const sel = $("#f-mun");
-  const itens = uf && uf !== "BR"
-    ? META.tabelas.ue.map((v, cod) => [cod, v]).filter(([, v]) => v.startsWith(uf + "|")).map(([cod, v]) => [cod, v.split("|")[1]])
-      .filter(([, n]) => n && normaliza(n) !== normaliza(uf))
-    : [];
-  // Agrupa grafias iguais (o TSE às vezes grava o mesmo município com e sem acento)
-  const porNome = new Map();
-  for (const [cod, n] of itens) { const k = normaliza(n); if (!porNome.has(k)) porNome.set(k, { nome: n, cods: [] }); porNome.get(k).cods.push(cod); }
-  const ordenados = [...porNome.values()].sort((a, b) => normaliza(a.nome).localeCompare(normaliza(b.nome)));
-  sel.innerHTML = `<option value="">Município: todos</option>` + ordenados.map((m) => `<option value="${m.cods.join(",")}">${esc(cap(m.nome))}</option>`).join("");
-  sel.hidden = !ordenados.length;
-  sel.value = selecionado;
+async function etapaMapa() {
+  const mapa = await getJson("assets/mapa-brasil.json");
+  const estados = mapa.locations.map((l) => ({ ...l, uf: l.id.toUpperCase() }));
+  return `<div class="mapa-wrap">
+    <svg class="mapa" viewBox="${mapa.viewBox}" role="img" aria-label="Mapa do Brasil — clique em um estado">
+      ${estados.map((e) => `<a href="#${hashExplorar({ uf: e.uf })}" aria-label="${esc(e.name)}">
+        <path d="${e.path}" data-uf="${e.uf}"><title>${esc(e.name)}</title></path></a>`).join("")}
+      <g class="mapa-rotulos"></g>
+    </svg>
+    <div class="mapa-lado">
+      <p class="muted">Clique em um estado no mapa ou escolha abaixo.</p>
+      <div class="chips-uf">${UFS.map((u) => `<a class="chip" href="#${hashExplorar({ uf: u })}" title="${esc(NOMES_UF[u])}">${u}</a>`).join("")}</div>
+      <a class="card-opcao destaque" href="#${hashExplorar({ uf: "BR" })}">
+        <strong>Brasil</strong><span>Presidente e vice-presidente da República</span></a>
+    </div>
+  </div>`;
 }
 
-function aplicarFiltrosNaTela(f) {
-  $("#f-uf").value = f.uf || "";
-  preencherMunicipios(f.uf || "", f.mun || "");
-  $("#f-ano").value = f.ano || "";
-  $("#f-cargo").value = f.cargo || "";
-  $("#f-eleitos").checked = f.eleitos === "1";
+// Siglas no centro de cada estado (calculado depois que o SVG está na página)
+function rotularMapa() {
+  const g = document.querySelector(".mapa-rotulos");
+  if (!g) return;
+  const pequenos = new Set(["DF", "SE", "AL", "RN", "PB", "ES", "RJ"]);
+  g.innerHTML = [...document.querySelectorAll(".mapa path")].map((p) => {
+    const b = p.getBBox();
+    const uf = p.dataset.uf;
+    return `<text x="${b.x + b.width / 2}" y="${b.y + b.height / 2}" class="${pequenos.has(uf) ? "peq" : ""}">${uf}</text>`;
+  }).join("");
+}
+
+function etapaAnos(uf) {
+  const anos = [...META.anos].reverse().filter((a) => (META.listas[a] || []).includes(uf));
+  if (!anos.length) return `<p class="muted">Não há eleições disponíveis para ${esc(NOMES_UF[uf] || uf)}.</p>`;
+  return `<div class="grade-opcoes">${anos.map((a) => `<a class="card-opcao" href="#${hashExplorar({ uf, ano: String(a) })}">
+      <strong>${a}</strong><span>${a % 4 === 0 ? "Eleições municipais" : "Eleições gerais"}${a === Math.max(...META.anos) ? " · dados preliminares" : ""}</span></a>`).join("")}</div>`;
+}
+
+async function etapaCargos(f) {
+  const lista = await getJson(`data/lista/${f.ano}_${f.uf}.json`);
+  const porChave = new Map();
+  for (const [cod, itens] of Object.entries(lista)) {
+    const k = chaveDoCargo(cod);
+    if (!k) continue;
+    const e = porChave.get(k) || { total: 0, eleitos: 0 };
+    e.total += itens.length;
+    e.eleitos += itens.filter((x) => eleitoRes(x[3])).length;
+    porChave.set(k, e);
+  }
+  const chaves = [...porChave.keys()].sort((a, b) => (ORDEM_CARGOS.indexOf(a) + 1 || 99) - (ORDEM_CARGOS.indexOf(b) + 1 || 99));
+  const n = (x) => x.toLocaleString("pt-BR");
+  return `<div class="grade-opcoes">${chaves.map((k) => {
+    const e = porChave.get(k);
+    return `<a class="card-opcao" href="#${hashExplorar({ uf: f.uf, ano: f.ano, cargo: k })}">
+      <strong>${esc(cargosFiltro().get(k).rotulo)}</strong><span>${n(e.total)} candidatura${e.total > 1 ? "s" : ""}${e.eleitos ? ` · ${n(e.eleitos)} eleito${e.eleitos > 1 ? "s" : ""}` : ""}</span></a>`;
+  }).join("")}</div>`;
+}
+
+const CARGOS_MUNICIPAIS = new Set(["PREFEITO", "VICE PREFEITO", "VEREADOR"]);
+
+// Controles da lista: município (cargos municipais) e "somente eleitos"
+async function etapaFiltrosLista(f) {
+  let mun = "";
+  if (CARGOS_MUNICIPAIS.has(f.cargo)) {
+    const lista = await getJson(`data/lista/${f.ano}_${f.uf}.json`);
+    const cods = cargosFiltro().get(f.cargo)?.codigos || new Set();
+    const ues = new Set();
+    for (const [cod, itens] of Object.entries(lista)) if (cods.has(+cod)) for (const x of itens) ues.add(x[1]);
+    const porNome = new Map(); // o TSE às vezes grava o mesmo município com grafias diferentes
+    for (const u of ues) {
+      const nome = (META.tabelas.ue[u] || "").split("|")[1] || "";
+      const k = normaliza(nome);
+      if (!porNome.has(k)) porNome.set(k, { nome, cods: [] });
+      porNome.get(k).cods.push(u);
+    }
+    const ord = [...porNome.values()].sort((a, b) => normaliza(a.nome).localeCompare(normaliza(b.nome)));
+    mun = `<label class="campo-lista">Município
+      <select id="x-mun"><option value="">Todos os municípios (${ord.length})</option>
+      ${ord.map((m) => `<option value="${m.cods.join(",")}" ${m.cods.join(",") === f.mun ? "selected" : ""}>${esc(cap(m.nome))}</option>`).join("")}</select></label>`;
+  }
+  return `<div class="filtros-lista">${mun}
+    <label class="check"><input type="checkbox" id="x-eleitos" ${f.eleitos ? "checked" : ""}> Somente eleitos</label></div>`;
+}
+
+function ligarFiltrosLista(f) {
+  const atualizar = () => {
+    const nf = { ...f, mun: $("#x-mun")?.value || "", eleitos: $("#x-eleitos").checked ? "1" : "" };
+    location.hash = hashExplorar(nf);
+  };
+  $("#x-mun")?.addEventListener("change", atualizar);
+  $("#x-eleitos").addEventListener("change", atualizar);
 }
 
 // Candidaturas (de um ano/UF) que atendem aos filtros: [{pid, cargo, ue, partido, resultado}]
@@ -510,8 +623,8 @@ async function consultar(q, f, pg = 1) {
   $("#partidos").innerHTML = "";
   $("#resultados").innerHTML = "";
   $("#resultados").hidden = false;
+  $("#explorar").innerHTML = "";
   $("#q").value = q;
-  aplicarFiltrosNaTela(f);
   const tk = tokens(normaliza(q));
   if (!tk.length && !temFiltro(f)) return setStatus("Digite um nome ou escolha filtros para consultar.");
   setStatus("Consultando…", { carregando: true });
@@ -641,6 +754,7 @@ async function mostrarFicha(pid, unica = false) {
           ${r.eleicoes.length ? `<span class="selo ok">eleito(a) ${r.eleicoes.length}×</span>` : `<span class="selo neutro">nunca eleito(a)</span>`}
           ${trocas ? `<span class="selo neutro">${trocas} troca${trocas > 1 ? "s" : ""} de partido</span>` : ""}
           ${problemas.length ? `<span class="selo alerta">${problemas.length} candidatura${problemas.length > 1 ? "s" : ""} com restrição</span>` : ""}
+          ${seloEspectro(p)}
           ${p.sancoes.length ? `<button type="button" class="selo alerta forte" id="ir-sancoes">⚠ ${p.sancoes.length} registro${p.sancoes.length > 1 ? "s" : ""} em cadastro de sanções</button>` : ""}
         </div>
       </div>
@@ -711,6 +825,8 @@ async function mostrarFicha(pid, unica = false) {
   if (v) v.onclick = () => history.back();
   const irS = $("#ir-sancoes");
   if (irS) irS.onclick = () => $("#sancoes").scrollIntoView({ behavior: semAnimacao ? "auto" : "smooth" });
+  const irE = $("#ir-espectro");
+  if (irE) irE.onclick = () => $("#espectro").scrollIntoView({ behavior: semAnimacao ? "auto" : "smooth", block: "start" });
   for (const b of document.querySelectorAll(".alternar button")) {
     b.onclick = () => {
       for (const o of document.querySelectorAll(".alternar button")) o.setAttribute("aria-pressed", String(o === b));
@@ -913,7 +1029,7 @@ const CAMPOS_FILTRO = ["uf", "ano", "cargo", "mun", "eleitos"];
 function lerHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   const f = Object.fromEntries(CAMPOS_FILTRO.map((k) => [k, h.get(k) || ""]));
-  return { q: h.get("q") || "", p: h.get("p"), pg: +(h.get("pg") || 1), partidos: h.has("partidos"), f };
+  return { q: h.get("q") || "", p: h.get("p"), pg: +(h.get("pg") || 1), partidos: h.has("partidos"), explorar: h.has("explorar"), f };
 }
 
 // Monta o hash de uma consulta (omitindo campos vazios)
@@ -926,15 +1042,28 @@ function hashConsulta(q, f, extra = {}) {
 }
 
 async function rotear() {
-  const { q, p, pg, partidos, f } = lerHash();
+  const { q, p, pg, partidos, explorar, f } = lerHash();
   $("#partidos").innerHTML = "";
-  if (partidos) return mostrarPartidos();
+  if (partidos) { $("#explorar").innerHTML = ""; return mostrarPartidos(); }
   if (p !== null) {
     if (q) $("#q").value = q;
     $("#resultados").hidden = true;
+    $("#explorar").hidden = true;
     return mostrarFicha(Number(p));
   }
+  $("#explorar").hidden = false;
   $("#ficha").innerHTML = "";
+  if (explorar) {
+    const chave = hashExplorar(f, { pg: pg > 1 ? pg : "" });
+    if ($("#q").dataset.ultima === chave && $("#explorar").innerHTML) {
+      $("#resultados").hidden = false;
+      return setStatus($("#status").dataset.anterior || "");
+    }
+    $("#q").dataset.ultima = chave;
+    $("#q").value = "";
+    return mostrarExplorar(f, pg);
+  }
+  $("#explorar").innerHTML = "";
   if (q || temFiltro(f)) {
     const chave = hashConsulta(q, f, { pg: pg > 1 ? pg : "" });
     if ($("#q").dataset.ultima !== chave || !$("#resultados").innerHTML) {
@@ -948,7 +1077,6 @@ async function rotear() {
   } else {
     $("#resultados").innerHTML = "";
     $("#q").value = "";
-    aplicarFiltrosNaTela({});
     setStatus("");
     mostrarInicio(true);
   }
@@ -964,27 +1092,25 @@ async function iniciar() {
   } catch (e) {
     return setStatus("Os dados ainda não foram gerados. Rode o workflow de build no GitHub Actions.", { erro: true });
   }
-  preencherFiltros();
   $("#busca").addEventListener("submit", (ev) => {
     ev.preventDefault();
     const q = $("#q").value.trim();
-    const f = lerFiltros();
-    if (q || temFiltro(f)) location.hash = hashConsulta(q, f);
-    else setStatus("Digite um nome ou escolha filtros para consultar.");
+    if (q) location.hash = hashConsulta(q, {});
+    else setStatus("Digite um nome para consultar, ou use “Explorar pelo mapa”.");
   });
   $("#resultados").addEventListener("click", (ev) => {
+    const { q, f, pg, explorar } = lerHash();
+    const monta = (extra) => (explorar ? hashExplorar(f, extra) : hashConsulta(q, f, extra));
     const pgBtn = ev.target.closest(".paginacao button[data-pg]");
     if (pgBtn) {
-      const { q, f } = lerHash();
-      location.hash = hashConsulta(q, f, { pg: pgBtn.dataset.pg > 1 ? pgBtn.dataset.pg : "" });
+      location.hash = monta({ pg: pgBtn.dataset.pg > 1 ? pgBtn.dataset.pg : "" });
       window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
       return;
     }
     const b = ev.target.closest(".cartao");
     if (!b) return;
     $("#status").dataset.anterior = $("#status").textContent;
-    const { q, f, pg } = lerHash();
-    location.hash = hashConsulta(q, f, { pg: pg > 1 ? pg : "", p: b.dataset.pid });
+    location.hash = monta({ pg: pg > 1 ? pg : "", p: b.dataset.pid });
   });
   $("#home").addEventListener("click", (ev) => { ev.preventDefault(); location.hash = ""; $("#q").focus(); });
   window.addEventListener("hashchange", rotear);
