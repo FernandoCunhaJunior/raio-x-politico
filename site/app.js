@@ -146,7 +146,7 @@ const NOMES_CADASTRO = {
 };
 
 // Posições definidas em scripts/build.py (gerar)
-function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao]) {
+function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao, receita]) {
   const T = META.tabelas;
   const [uf, local] = T.ue[ue].split("|");
   const [sigla, nomePartido] = T.partido[partido].split("|");
@@ -160,6 +160,8 @@ function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleica
     porTipo: porTipo || null,
     ocupacao: T.ocupacao[ocupacao || 0],
     coligacao: coligacao || "",
+    // Receitas de campanha (2018+): total, fundo eleitoral (FEFC), fundo partidário
+    receita: receita ? { total: receita[0], fefc: receita[1], fp: receita[2], publico: receita[1] + receita[2] } : null,
   };
 }
 
@@ -386,6 +388,8 @@ async function mostrarFicha(pid, unica = false) {
 
     ${blocoPerfil(p)}
 
+    ${blocoFinanciamento(p)}
+
     ${mandatos.length || pares ? `<div class="bloco">
       <h3>Patrimônio em perspectiva</h3>
       <ul class="fatos">
@@ -447,6 +451,58 @@ async function mostrarFicha(pid, unica = false) {
 }
 
 const fmtPct = (x) => `${x.toLocaleString("pt-BR", { maximumFractionDigits: x < 10 ? 1 : 0 })}%`;
+
+// Posição da verba pública recebida entre os candidatos do mesmo cargo e ano (percentil).
+function percentilPublico(c) {
+  const pct = META.percentis_publico?.[`${c.ano}|${c.cargoCod}`];
+  if (!pct || !c.receita) return null;
+  let n = 0;
+  while (n < 100 && pct[n + 1] < c.receita.publico) n++;
+  return n;
+}
+
+function blocoFinanciamento(p) {
+  const cs = p.cands.filter((c) => c.receita);
+  if (!cs.length) return "";
+  const totalPub = cs.reduce((s, c) => s + c.receita.publico, 0);
+  const totalReal = cs.reduce((s, c) => s + real(c.receita.publico, c.ano), 0);
+  const max = Math.max(...cs.map((c) => c.receita.total), 1);
+  const linhas = [...cs].reverse().map((c) => {
+    const r = c.receita, outros = Math.max(0, r.total - r.publico);
+    const pctPub = r.total ? Math.round((r.publico / r.total) * 100) : 0;
+    const w = (v) => `${(v / max) * 100}%`;
+    const pctl = percentilPublico(c);
+    return `<tr>
+      <td>${c.ano}</td>
+      <td>${esc(cap(c.cargo))}<div class="muted">${esc(localTexto(c))}</div></td>
+      <td class="num"><strong>${brl.format(r.total)}</strong></td>
+      <td class="num">${brl.format(r.fefc)}</td>
+      <td class="num">${brl.format(r.fp)}</td>
+      <td class="num">${brl.format(outros)}</td>
+      <td class="barra-fin-cel">
+        <div class="barra-fin" title="Fundo eleitoral ${brl.format(r.fefc)} · Fundo partidário ${brl.format(r.fp)} · Outros ${brl.format(outros)}">
+          <i class="fin0" style="width:${w(r.fefc)}"></i><i class="fin1" style="width:${w(r.fp)}"></i><i class="fin2" style="width:${w(outros)}"></i>
+        </div>
+        <small class="muted">${pctPub}% público${pctl !== null && r.publico > 0 ? ` · mais que ${pctl}% dos candidatos a ${esc(cap(c.cargo))}` : ""}</small>
+      </td></tr>`;
+  }).join("");
+  return `<div class="bloco">
+    <h3>Financiamento de campanha</h3>
+    <div class="resumo resumo-fin">
+      <div class="kpi destaque"><div class="rot">Verba pública recebida (${cs[0].ano === cs[cs.length - 1].ano ? cs[0].ano : `${cs[0].ano}–${cs[cs.length - 1].ano}`})</div>
+        <div class="val">${brl.format(totalPub)}</div>
+        <div class="rot" style="margin-top:4px">≈ ${brl.format(totalReal)} em R$ de ${mesRef()}</div></div>
+    </div>
+    <div class="legenda"><span><i class="fin0"></i>Fundo eleitoral (FEFC)</span><span><i class="fin1"></i>Fundo partidário</span><span><i class="fin2"></i>Outras fontes</span></div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Ano</th><th>Cargo</th><th class="num">Total arrecadado</th><th class="num">Fundo eleitoral</th><th class="num">Fundo partidário</th><th class="num">Outras fontes</th><th>Composição</th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>
+    <p class="nota">Receitas declaradas na prestação de contas de campanha (TSE), disponíveis a partir de 2018 — ano em que o Fundo Especial
+      de Financiamento de Campanha passou a existir. Inclui recursos financeiros e estimáveis (bens e serviços) e repasses de partidos e de
+      outros candidatos. Dados de 2026 são parciais.</p>
+  </div>`;
+}
 
 function blocoSancoes(p) {
   if (!p.sancoes.length) return "";

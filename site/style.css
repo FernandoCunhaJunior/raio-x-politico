@@ -254,6 +254,15 @@ tr.problema td:first-child { box-shadow: inset 4px 0 0 var(--vermelho); }
 td.partido-cel { white-space: normal; min-width: 90px; }
 .colig { font-size: .78rem; color: var(--muted); max-width: 220px; line-height: 1.35; margin-top: 2px; }
 
+/* Financiamento de campanha */
+:root { --fin0: #c4161c; --fin1: #e98a8e; --fin2: #9a9a9f; }
+@media (prefers-color-scheme: dark) { :root { --fin0: #ff4d53; --fin1: #f2a6a9; --fin2: #6e6d72; } }
+.fin0 { background: var(--fin0); } .fin1 { background: var(--fin1); } .fin2 { background: var(--fin2); }
+.resumo-fin { margin-top: 0; grid-template-columns: minmax(220px, 360px); }
+.barra-fin-cel { min-width: 180px; white-space: normal; }
+.barra-fin { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
+.barra-fin i { display: block; height: 100%; }
+
 /* Sanções */
 .selo.forte { background: var(--vermelho); color: #fff; border-color: var(--vermelho); cursor: pointer; font: inherit; font-size: .75rem; font-weight: 700; }
 .bloco.sancoes { border-color: rgba(196, 22, 28, .45); box-shadow: 0 0 0 3px rgba(196, 22, 28, .08), var(--shadow); }

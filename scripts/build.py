@@ -218,6 +218,54 @@ def carregar_bens(raw, anos):
     return bens
 
 
+COLS_RECEITA = ["SG_UE", "SQ_CANDIDATO", "DS_FONTE_RECEITA", "VR_RECEITA"]
+
+
+def fonte_receita(ds):
+    """0 = Fundo Especial (FEFC, "fundo eleitoral"), 1 = Fundo Partidário, 2 = outros recursos."""
+    n = normaliza(ds)
+    if "FUNDO ESPECIAL" in n or "FEFC" in n:
+        return 0
+    if "FUNDO PARTIDARIO" in n:
+        return 1
+    return 2
+
+
+def carregar_receitas(raw, anos):
+    """Por ano: DataFrame indexado por 'SG_UE|SQ_CANDIDATO' com colunas total, fefc, fp (em R$).
+
+    Fonte: prestacao_de_contas_eleitorais_candidatos_AAAA.zip (TSE), arquivo receitas_candidatos_AAAA_BRASIL.csv.
+    Inclui recursos financeiros e estimáveis e transferências recebidas de partidos/outros candidatos.
+    """
+    receitas = {}
+    for caminho in sorted(glob.glob(os.path.join(raw, "prestacao_de_contas_eleitorais_candidatos_*.zip"))):
+        ano = ano_do_arquivo(caminho)
+        if anos and ano not in anos:
+            continue
+        partes, contagem = [], pd.Series(dtype=float)
+        with zipfile.ZipFile(caminho) as z:
+            nome = next((n for n in z.namelist() if re.fullmatch(rf"receitas_candidatos_{ano}_BRASIL\.csv", n, re.I)), None)
+            if not nome:
+                log(f"receitas {ano}: arquivo nacional não encontrado — ignorado")
+                continue
+            with z.open(nome) as f:
+                for bloco in pd.read_csv(f, sep=";", encoding="latin-1", dtype=str, keep_default_na=False,
+                                         usecols=lambda c: c in COLS_RECEITA, chunksize=1_000_000):
+                    fontes = {d: fonte_receita(d) for d in pd.unique(bloco["DS_FONTE_RECEITA"])}
+                    bloco["f"] = bloco["DS_FONTE_RECEITA"].map(fontes)
+                    bloco["v"] = para_reais(bloco["VR_RECEITA"])
+                    contagem = contagem.add(bloco.groupby("DS_FONTE_RECEITA")["v"].sum(), fill_value=0)
+                    chave = bloco["SG_UE"] + "|" + bloco["SQ_CANDIDATO"]
+                    partes.append(bloco.pivot_table(index=chave, columns="f", values="v", aggfunc="sum", fill_value=0.0))
+        tab = pd.concat(partes).groupby(level=0).sum().reindex(columns=[0, 1, 2], fill_value=0.0)
+        tab.columns = ["fefc", "fp", "outros"]
+        tab["total"] = tab.sum(axis=1)
+        receitas[ano] = tab
+        resumo = ", ".join(f"{k or '(vazio)'}: R$ {v / 1e6:,.1f} mi" for k, v in contagem.sort_values(ascending=False).items())
+        log(f"receitas {ano}: {len(tab):,} candidaturas com receitas | {resumo}")
+    return receitas
+
+
 def carregar_correcoes():
     caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "correcoes.csv")
     return pd.read_csv(caminho, sep=";", dtype=str, comment="#", keep_default_na=False)
@@ -249,7 +297,7 @@ def completar_resultados(df, ano, correcoes):
     return int(herdar.sum() - (res[herdar] == "").sum())
 
 
-def carregar_candidaturas(raw, anos, bens, tab):
+def carregar_candidaturas(raw, anos, bens, tab, receitas):
     correcoes = carregar_correcoes()
     blocos = []
     for caminho in sorted(glob.glob(os.path.join(raw, "consulta_cand_*.zip"))):
@@ -285,6 +333,13 @@ def carregar_candidaturas(raw, anos, bens, tab):
                                                          df["DS_COMPOSICAO_FEDERACAO"])
         composicao = composicao.where(com_colig & composicao.str.contains("/", regex=False), "")
         extras = {f"b{i}": por_cat[i] for i in range(n_cat)}
+        # Receitas de campanha (2018+): NaN = sem prestação de contas/receitas no arquivo do TSE
+        if ano in receitas:
+            r = receitas[ano].reindex(df["SG_UE"] + "|" + df["SQ_CANDIDATO"])
+            extras.update(rec_total=r["total"].to_numpy(), rec_fefc=r["fefc"].to_numpy(), rec_fp=r["fp"].to_numpy())
+        else:
+            extras.update(rec_total=np.full(len(df), np.nan), rec_fefc=np.full(len(df), np.nan),
+                          rec_fp=np.full(len(df), np.nan))
         blocos.append(pd.DataFrame({
             **extras,
             "genero": tab["genero"].codifica(df["DS_GENERO"]),
@@ -510,6 +565,18 @@ def percentis_eleitos(df, foi_eleito):
     return out
 
 
+def percentis_verba_publica(df):
+    """Percentis 0..100 da verba pública (fundo eleitoral + partidário) recebida por candidatos, por ano e cargo."""
+    ok = ~np.isnan(df["rec_total"].to_numpy())
+    sub = df.loc[ok, ["ano", "cargo"]].assign(pub=(df["rec_fefc"] + df["rec_fp"])[ok])
+    out = {}
+    for (ano, cargo), g in sub.groupby(["ano", "cargo"]):
+        if len(g) >= 20:
+            out[f"{ano}|{cargo}"] = [int(round(x)) for x in np.percentile(g["pub"].to_numpy(), range(101))]
+    log(f"percentis de verba pública: {len(out)} grupos ano/cargo")
+    return out
+
+
 def carregar_ipca():
     """Número-índice do IPCA (IBGE/SIDRA) de outubro de cada ano + o mês mais recente.
 
@@ -570,6 +637,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
            ["pid", "ano", "eleicao", "cargo", "ue", "partido", "situacao", "resultado",
             "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask",
             "genero", "instrucao", "cor", "uf_nasc", "coligacao", "sanc", "sq", "sg_ue", "uf",
+            "rec_total", "rec_fefc", "rec_fp",
             *[f"b{i}" for i in range(n_cat)]]}
     com_sancao = com_foto = 0
     inicios = np.flatnonzero(np.r_[True, col["pid"][1:] != col["pid"][:-1]])
@@ -601,7 +669,10 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
             v = col["bens"][i]
             tem_bens = not np.isnan(v) and v > 0
             # Posições (site/app.js): 0 ano, 1 cargo, 2 local, 3 partido, 4 situação, 5 resultado,
-            # 6 bens (total), 7 eleição suplementar, 8 chapa, 9 bens por categoria, 10 ocupação, 11 coligação.
+            # 6 bens (total), 7 eleição suplementar, 8 chapa, 9 bens por categoria, 10 ocupação, 11 coligação,
+            # 12 receitas de campanha [total, fundo eleitoral (FEFC), fundo partidário].
+            rt = col["rec_total"][i]
+            receita = None if np.isnan(rt) else [int(round(rt)), int(round(col["rec_fefc"][i])), int(round(col["rec_fp"][i]))]
             cand = [
                 int(col["ano"][i]), int(col["cargo"][i]), int(col["ue"][i]), int(col["partido"][i]),
                 int(col["situacao"][i]), int(col["resultado"][i]),
@@ -610,6 +681,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
                 [int(round(col[f"b{k}"][i])) for k in range(n_cat)] if tem_bens else None,
                 int(col["ocupacao"][i]),
                 col["coligacao"][i],
+                receita,
             ]
             while len(cand) > 8 and cand[-1] in (None, "", 0):  # corta campos finais vazios
                 cand.pop()
@@ -678,6 +750,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
         "tabelas": {k: t.itens for k, t in tab.items()},
         "categorias_bens": CATEGORIAS,
         "percentis": percentis_eleitos(df, foi_eleito),
+        "percentis_publico": percentis_verba_publica(df),
         "ipca": carregar_ipca(),
         "sancoes_fontes": fontes_sancoes,  # {"CEIS": "AAAAMMDD", ...}
         "fotos_eleicoes": [e for _, _, e in ELEICOES_FOTO],  # índice usado nas referências de foto
@@ -698,8 +771,9 @@ def main():
     tab = {k: Tabela() for k in ["eleicao", "cargo", "ue", "partido", "situacao", "resultado", "ocupacao",
                                  "genero", "instrucao", "cor"]}
     bens = carregar_bens(args.raw, anos)
-    df = carregar_candidaturas(args.raw, anos, bens, tab)
-    del bens
+    receitas = carregar_receitas(args.raw, anos)
+    df = carregar_candidaturas(args.raw, anos, bens, tab, receitas)
+    del bens, receitas
     rot, nome_norm = agrupar_pessoas(df)
     arquivos_cgu = baixar_cgu(os.path.join(args.raw, "cgu"))
     sancoes = carregar_sancoes(arquivos_cgu)
