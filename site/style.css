@@ -171,10 +171,10 @@ a { color: var(--link); }
 .tag-esp { display: inline-block; font-size: .7rem; padding: 0 6px; border-radius: 999px; border: 1px solid var(--c); color: var(--muted); margin-left: 2px; }
 
 /* Colinha — folha para impressão */
-/* Cartão de bolso: 90 × 130 mm (mesmo tamanho na tela e na impressão) */
+/* Cartão de bolso: 90 mm de largura, altura conforme o conteúdo (~10 cm); mesmo tamanho na tela e na impressão */
 .colinha-recorte { width: 90mm; margin: 14px auto 2px; font-size: 8pt; color: #777; }
 .colinha-folha {
-  width: 90mm; min-height: 130mm; margin: 0 auto 14px; box-sizing: border-box; background: #fff; color: #111;
+  width: 90mm; margin: 0 auto 14px; box-sizing: border-box; background: #fff; color: #111;
   border: 1.5px dashed #888; border-radius: 3mm; padding: 4mm 4.5mm; font-size: 8.5pt; line-height: 1.25;
   display: flex; flex-direction: column;
 }

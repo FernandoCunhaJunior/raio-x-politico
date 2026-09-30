@@ -775,8 +775,8 @@ function renderImpressao(el, topo, uf, vagas, escolhas, dados) {
   }).join("");
   const [aaaa, mm, dd] = (dados.data_tse || "").split("/").reverse();
   el.innerHTML = `<div class="bloco nao-imprimir">${topo("Etapa 3 de 3 · Confira e imprima")}
-      <p class="muted">Confira os números. A colinha sai no <b>tamanho de bolso (9 × 13 cm)</b>: imprima em folha A4 comum e recorte na linha
-        tracejada. Também dá para “salvar como PDF”.</p>
+      <p class="muted">Confira os números. A colinha sai no <b>tamanho de bolso (cerca de 9 × 10 cm)</b>: imprima em folha A4 comum e recorte na
+        linha tracejada. Também dá para “salvar como PDF”.</p>
       <div class="acoes"><button type="button" class="botao-primario" id="btn-imprimir">🖨️ Imprimir colinha</button>
         <a class="botao-sec" href="#colinha=1&uf=${uf}">← Alterar escolhas</a></div></div>
     <div class="colinha-recorte">✂ recorte na linha tracejada</div>
