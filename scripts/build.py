@@ -301,6 +301,8 @@ def carregar_candidaturas(raw, anos, bens, tab, receitas):
     correcoes = carregar_correcoes()
     blocos = []
     for caminho in sorted(glob.glob(os.path.join(raw, "consulta_cand_*.zip"))):
+        if not re.fullmatch(r"consulta_cand_\d{4}\.zip", os.path.basename(caminho)):
+            continue  # ignora consulta_cand_complementar_AAAA.zip (usado só na colinha)
         ano = ano_do_arquivo(caminho)
         if anos and ano not in anos:
             continue
