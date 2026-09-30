@@ -39,6 +39,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Garante que o atributo hidden sempre esconda, mesmo em elementos com display definido (ex.: .cand usa grid) */
+[hidden] { display: none !important; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
