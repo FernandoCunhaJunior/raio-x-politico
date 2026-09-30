@@ -552,6 +552,7 @@ function aplicarFiltrosColinha() {
       const okTxt = !txt || (q && t.includes(q)) || (dig && t.split(" ").some((x) => x.startsWith(dig)));
       const okEsp = filtroEspectro.has(li.dataset.grupo) || li.classList.contains("sel");
       li.hidden = !(okTxt && okEsp);
+      li.style.display = li.hidden ? "none" : ""; // não depende do CSS (cache antigo de style.css)
       if (!li.hidden) visiveis++;
     });
     sec.querySelectorAll("[data-legenda] option[data-grupo]").forEach((o) => { o.hidden = !filtroEspectro.has(o.dataset.grupo); });
@@ -1331,7 +1332,8 @@ async function iniciar() {
     contar($("#n-pessoas"), META.pessoas);
     contar($("#n-cands"), META.candidaturas);
     $("#n-anos").textContent = `${META.anos.length} (${META.anos[0]}–${META.anos[META.anos.length - 1]})`;
-    $("#meta-info").textContent = `Base atualizada em ${META.gerado_em.split("-").reverse().join("/")}.`;
+    const versaoSite = (document.querySelector('script[src*="app.js"]')?.src.match(/v=([a-f0-9]+)/) || [])[1] || "local";
+    $("#meta-info").textContent = `Base atualizada em ${META.gerado_em.split("-").reverse().join("/")} · versão ${versaoSite}.`;
   } catch (e) {
     return setStatus("Os dados ainda não foram gerados. Rode o workflow de build no GitHub Actions.", { erro: true });
   }
