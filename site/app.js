@@ -533,6 +533,7 @@ function barraEspectro() {
       ${GRUPOS_ESPECTRO.map((g, i) => `<button type="button" class="chip-esp esp-${i}" data-grupo="${esc(g)}" aria-pressed="${filtroEspectro.has(g)}">${esc(g)}</button>`).join("")}
       <button type="button" class="chip-esp-todos" data-grupo="*">Todos</button>
     </div>
+    <p class="resumo-filtro" id="resumo-filtro" aria-live="polite"></p>
     <p class="nota">Marque um ou mais grupos. A classificação é do <strong>partido</strong> (não da pessoa), segundo
       <a href="#partidos=1">Bolognesi, Ribeiro e Codato (2023)</a>; “Esquerda” inclui a extrema-esquerda e “Direita” inclui a
       extrema-direita. Partidos não avaliados no estudo (ex.: União Brasil, PRD, Missão) estão em “Sem classificação”.</p>
@@ -542,6 +543,7 @@ function barraEspectro() {
 // Aplica busca por texto (por vaga) + filtro de espectro (global) às listas da colinha
 function aplicarFiltrosColinha() {
   document.querySelectorAll(".chip-esp").forEach((b) => b.setAttribute("aria-pressed", filtroEspectro.has(b.dataset.grupo)));
+  let totalVis = 0, totalGeral = 0;
   document.querySelectorAll(".vaga").forEach((sec) => {
     const inp = sec.querySelector("[data-busca-vaga]");
     const txt = inp?.value.trim() || "";
@@ -557,8 +559,26 @@ function aplicarFiltrosColinha() {
     });
     sec.querySelectorAll("[data-legenda] option[data-grupo]").forEach((o) => { o.hidden = !filtroEspectro.has(o.dataset.grupo); });
     const vazio = sec.querySelector(".lista-vazia");
-    if (vazio) vazio.hidden = visiveis > 0;
+    if (vazio) { vazio.hidden = visiveis > 0; vazio.style.display = vazio.hidden ? "none" : ""; }
+    // Contador do cargo: "52 de 508 candidatos" quando há filtro/busca
+    const cont = sec.querySelector(".cont-vaga");
+    if (cont) {
+      const total = +cont.dataset.total;
+      cont.textContent = visiveis === total ? `${total} candidatos` : `${visiveis} de ${total} candidatos`;
+      cont.classList.toggle("filtrado", visiveis !== total);
+    }
+    if (sec.id !== "vaga-S2") { // senadores aparecem em duas listas; conta uma vez só
+      totalVis += visiveis;
+      totalGeral += sec.querySelectorAll(".cand").length;
+    }
   });
+  const resumo = $("#resumo-filtro");
+  if (resumo) {
+    const ativos = GRUPOS_ESPECTRO.filter((g) => filtroEspectro.has(g));
+    resumo.innerHTML = ativos.length === GRUPOS_ESPECTRO.length
+      ? `Mostrando <b>todos os ${totalGeral.toLocaleString("pt-BR")}</b> candidatos.`
+      : `Mostrando <b>${totalVis.toLocaleString("pt-BR")}</b> de ${totalGeral.toLocaleString("pt-BR")} candidatos — ${esc(ativos.join(", "))}.`;
+  }
 }
 
 const chaveColinha = (uf) => `colinha_${META.colinha?.ano}_${uf}`;
@@ -632,7 +652,7 @@ function secaoVaga(v, dados, escolhas) {
       <select data-legenda="${v.id}"><option value="">—</option>${(dados.partidos || []).map(([n, s]) =>
         `<option value="${esc(n)}|${esc(s)}" data-grupo="${esc(grupoEspectro(s, dados.ano))}" ${esc0?.tipo === "legenda" && esc0.nr === n ? "selected" : ""}>${esc(n)} · ${esc(s)}</option>`).join("")}</select></label>` : "";
   return `<section class="bloco vaga" id="vaga-${v.id}">
-    <div class="vaga-topo"><h3>${esc(v.rot)} <small>${v.dig} dígitos · ${lista.length} candidatos</small></h3>
+    <div class="vaga-topo"><h3>${esc(v.rot)} <small>${v.dig} dígitos · <span class="cont-vaga" data-total="${lista.length}">${lista.length} candidatos</span></small></h3>
       <span class="vaga-escolha" id="escolha-${v.id}"></span></div>
     <div class="vaga-ctrl"><input type="search" placeholder="Buscar por nome, número ou partido" data-busca-vaga="${v.id}" aria-label="Buscar em ${esc(v.rot)}">
       ${legenda}<button type="button" class="branco" data-branco="${v.id}">Em branco</button></div>
