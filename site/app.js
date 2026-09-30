@@ -482,22 +482,212 @@ async function mostrarExplorar(f, pg) {
   if (etapa < 4) window.scrollTo({ top: $(".conteudo").offsetTop - 8, behavior: semAnimacao ? "auto" : "smooth" });
 }
 
-async function etapaMapa() {
+// Mapa clicável; `link(uf)` monta o destino de cada estado. `extra` = HTML adicional na lateral.
+async function etapaMapa(link = (uf) => hashExplorar({ uf }), extra = null) {
   const mapa = await getJson("assets/mapa-brasil.json");
   const estados = mapa.locations.map((l) => ({ ...l, uf: l.id.toUpperCase() }));
+  const lado = extra ?? `<a class="card-opcao destaque" href="#${hashExplorar({ uf: "BR" })}">
+        <strong>Brasil</strong><span>Presidente e vice-presidente da República</span></a>`;
   return `<div class="mapa-wrap">
     <svg class="mapa" viewBox="${mapa.viewBox}" role="img" aria-label="Mapa do Brasil — clique em um estado">
-      ${estados.map((e) => `<a href="#${hashExplorar({ uf: e.uf })}" aria-label="${esc(e.name)}">
+      ${estados.map((e) => `<a href="#${link(e.uf)}" aria-label="${esc(e.name)}">
         <path d="${e.path}" data-uf="${e.uf}"><title>${esc(e.name)}</title></path></a>`).join("")}
       <g class="mapa-rotulos"></g>
     </svg>
     <div class="mapa-lado">
       <p class="muted">Clique em um estado no mapa ou escolha abaixo.</p>
-      <div class="chips-uf">${UFS.map((u) => `<a class="chip" href="#${hashExplorar({ uf: u })}" title="${esc(NOMES_UF[u])}">${u}</a>`).join("")}</div>
-      <a class="card-opcao destaque" href="#${hashExplorar({ uf: "BR" })}">
-        <strong>Brasil</strong><span>Presidente e vice-presidente da República</span></a>
+      <div class="chips-uf">${UFS.map((u) => `<a class="chip" href="#${link(u)}" title="${esc(NOMES_UF[u])}">${u}</a>`).join("")}</div>
+      ${lado}
     </div>
   </div>`;
+}
+
+// ---------- Colinha (volante) para o dia da eleição ----------
+
+// Ordem de votação na urna (eleições gerais). Senador tem duas vagas em 2026.
+const VAGAS_COLINHA = [
+  { id: "DF", cargo: "DEPUTADO FEDERAL", rot: "Deputado(a) federal", dig: 4, legenda: true },
+  { id: "DE", cargo: "DEPUTADO ESTADUAL", rot: "Deputado(a) estadual", dig: 5, legenda: true },
+  { id: "DD", cargo: "DEPUTADO DISTRITAL", rot: "Deputado(a) distrital", dig: 5, legenda: true },
+  { id: "S1", cargo: "SENADOR", rot: "Senador(a) — 1º voto", dig: 3 },
+  { id: "S2", cargo: "SENADOR", rot: "Senador(a) — 2º voto", dig: 3 },
+  { id: "GV", cargo: "GOVERNADOR", rot: "Governador(a)", dig: 2 },
+  { id: "PR", cargo: "PRESIDENTE", rot: "Presidente da República", dig: 2 },
+];
+const DATA_ELEICAO = "4 de outubro de 2026 (1º turno)";
+
+const chaveColinha = (uf) => `colinha_${META.colinha?.ano}_${uf}`;
+function lerEscolhas(uf) { try { return JSON.parse(localStorage.getItem(chaveColinha(uf)) || "{}"); } catch { return {}; } }
+function salvarEscolhas(uf, e) { try { localStorage.setItem(chaveColinha(uf), JSON.stringify(e)); } catch { /* navegação privada */ } }
+
+async function dadosColinha(uf) {
+  const ano = META.colinha.ano;
+  const [est, br] = await Promise.all([getJson(`data/colinha/${ano}_${uf}.json`),
+    META.colinha.ufs.includes("BR") ? getJson(`data/colinha/${ano}_BR.json`) : Promise.resolve({ cargos: {} })]);
+  return { ...est, cargos: { ...est.cargos, PRESIDENTE: br.cargos.PRESIDENTE || [] } };
+}
+
+async function mostrarColinha(uf, imprimir) {
+  mostrarInicio(false);
+  for (const s of ["#ficha", "#partidos", "#resultados", "#explorar"]) $(s).innerHTML = "";
+  setStatus("");
+  const el = $("#explorar");
+  el.hidden = false;
+  if (!META.colinha) { el.innerHTML = `<div class="bloco"><p class="muted">A colinha ainda não está disponível.</p></div>`; return; }
+  const topo = (etapa) => `<div class="explorar-topo"><nav class="trilha"><a href="#colinha=1">Colinha</a>${uf ? `<span class="sep">›</span>${imprimir
+    ? `<a href="#colinha=1&uf=${uf}">${esc(NOMES_UF[uf])}</a><span class="sep">›</span><span aria-current="page">Imprimir</span>`
+    : `<span aria-current="page">${esc(NOMES_UF[uf])}</span>`}` : ""}</nav><span class="etapa">${etapa}</span></div>`;
+
+  if (!uf) {
+    el.innerHTML = `<div class="bloco explorar colinha-intro">${topo("Etapa 1 de 3 · Escolha o seu estado")}
+      <p>Monte a sua <strong>colinha</strong> para o dia da eleição (${DATA_ELEICAO}): escolha seus candidatos e imprima uma
+        folha com os números, na ordem em que você vai votar na urna. Suas escolhas ficam só neste navegador.</p>
+      <div id="explorar-corpo"></div></div>`;
+    $("#explorar-corpo").innerHTML = await etapaMapa((u) => `colinha=1&uf=${u}`, `<p class="nota">O voto para Presidente é o mesmo em todo o país e aparece junto com os cargos do seu estado.</p>`);
+    rotularMapa();
+    return;
+  }
+  el.innerHTML = `<div class="bloco"><div class="status"><span class="spinner"></span> Carregando candidatos…</div></div>`;
+  let dados;
+  try { dados = await dadosColinha(uf); } catch (e) {
+    el.innerHTML = `<div class="bloco"><p class="muted">Não há dados de candidatos para ${esc(NOMES_UF[uf] || uf)}.</p></div>`; return;
+  }
+  const vagas = VAGAS_COLINHA.filter((v) => (dados.cargos[v.cargo] || []).length);
+  const escolhas = lerEscolhas(uf);
+  if (imprimir) return renderImpressao(el, topo, uf, vagas, escolhas, dados);
+
+  el.innerHTML = `<div class="bloco explorar">${topo("Etapa 2 de 3 · Escolha seus candidatos")}
+    <p class="muted">Candidatos que estão na urna, em ordem alfabética. Toque em um nome para escolher; toque de novo para desfazer.
+      Dados do TSE de ${esc(dados.data_tse || "—")}.</p></div>
+    ${vagas.map((v) => secaoVaga(v, dados, escolhas)).join("")}
+    <div class="barra-colinha"><span id="colinha-contador"></span>
+      <a class="botao-primario" href="#colinha=1&uf=${uf}&imprimir=1">Ver e imprimir minha colinha →</a></div>`;
+  ligarColinha(uf, vagas, dados);
+  window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
+}
+
+function secaoVaga(v, dados, escolhas) {
+  const lista = dados.cargos[v.cargo] || [];
+  const esc0 = escolhas[v.id];
+  const linhas = lista.map((c, k) => {
+    const [nr, nome, sigla, , pid, sq, ue, alerta, comp] = c;
+    const grave = alerta && !/^DEFERIDO/.test(normaliza(alerta));
+    const sel = esc0?.tipo === "cand" && esc0.nr === nr;
+    return `<li class="cand${sel ? " sel" : ""}" data-vaga="${v.id}" data-k="${k}" data-busca="${esc(normaliza(nome) + " " + nr + " " + normaliza(sigla))}" tabindex="0" role="button" aria-pressed="${sel}">
+      <img loading="lazy" referrerpolicy="no-referrer" alt="" src="${FOTO_BASE}/${META.fotos_eleicoes[META.fotos_eleicoes.length - 1]}/${esc(sq)}/${esc(ue)}">
+      <span class="cand-info"><strong>${esc(nome)}</strong><small>${esc(sigla)}${comp ? ` · ${esc(comp)}` : ""}</small>
+        ${alerta ? `<em class="${grave ? "grave" : "leve"}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>` : ""}</span>
+      <span class="cand-num">${esc(nr)}</span>
+      <a class="cand-ficha" href="#${new URLSearchParams({ q: nome, p: pid })}" title="Ver ficha">ficha</a>
+    </li>`;
+  }).join("");
+  const legenda = v.legenda ? `<label class="legenda-sel">ou votar só no partido (legenda):
+      <select data-legenda="${v.id}"><option value="">—</option>${(dados.partidos || []).map(([n, s]) =>
+        `<option value="${esc(n)}|${esc(s)}" ${esc0?.tipo === "legenda" && esc0.nr === n ? "selected" : ""}>${esc(n)} · ${esc(s)}</option>`).join("")}</select></label>` : "";
+  return `<section class="bloco vaga" id="vaga-${v.id}">
+    <div class="vaga-topo"><h3>${esc(v.rot)} <small>${v.dig} dígitos · ${lista.length} candidatos</small></h3>
+      <span class="vaga-escolha" id="escolha-${v.id}"></span></div>
+    <div class="vaga-ctrl"><input type="search" placeholder="Buscar por nome, número ou partido" data-busca-vaga="${v.id}" aria-label="Buscar em ${esc(v.rot)}">
+      ${legenda}<button type="button" class="branco" data-branco="${v.id}">Em branco</button></div>
+    <ul class="lista-cand">${linhas}</ul>
+  </section>`;
+}
+
+function textoEscolha(e) {
+  if (!e) return `<span class="muted">nenhuma escolha</span>`;
+  if (e.tipo === "branco") return "<b>Em branco</b>";
+  if (e.tipo === "legenda") return `<b>${esc(e.nr)}</b> · legenda ${esc(e.sigla)}`;
+  return `<b>${esc(e.nr)}</b> · ${esc(e.nome)} (${esc(e.sigla)})`;
+}
+
+function ligarColinha(uf, vagas, dados) {
+  const escolhas = lerEscolhas(uf);
+  const atualizar = () => {
+    salvarEscolhas(uf, escolhas);
+    let n = 0;
+    for (const v of vagas) {
+      const e = escolhas[v.id];
+      if (e) n++;
+      $(`#escolha-${v.id}`).innerHTML = textoEscolha(e);
+      // No 2º voto para senador não dá para repetir o candidato do 1º (e vice-versa)
+      const outro = v.id === "S1" ? escolhas.S2 : v.id === "S2" ? escolhas.S1 : null;
+      for (const li of document.querySelectorAll(`#vaga-${v.id} .cand`)) {
+        const c = (dados.cargos[v.cargo] || [])[+li.dataset.k];
+        const sel = e?.tipo === "cand" && e.nr === c[0];
+        li.classList.toggle("sel", sel);
+        li.setAttribute("aria-pressed", sel);
+        li.classList.toggle("bloqueado", !!(outro?.tipo === "cand" && outro.nr === c[0]));
+      }
+      const sel = document.querySelector(`[data-legenda="${v.id}"]`);
+      if (sel) sel.value = e?.tipo === "legenda" ? `${e.nr}|${e.sigla}` : "";
+    }
+    $("#colinha-contador").textContent = `${n} de ${vagas.length} escolhas feitas`;
+  };
+  const escolher = (li) => {
+    if (li.classList.contains("bloqueado")) return;
+    const v = vagas.find((x) => x.id === li.dataset.vaga);
+    const [nr, nome, sigla] = (dados.cargos[v.cargo] || [])[+li.dataset.k];
+    const atual = escolhas[v.id];
+    if (atual?.tipo === "cand" && atual.nr === nr) delete escolhas[v.id];
+    else escolhas[v.id] = { tipo: "cand", nr, nome, sigla };
+    atualizar();
+  };
+  const raiz = $("#explorar");
+  raiz.onclick = (ev) => {
+    if (ev.target.closest(".cand-ficha")) return; // o link da ficha segue normalmente
+    const li = ev.target.closest(".cand");
+    if (li) return escolher(li);
+    const b = ev.target.closest("[data-branco]");
+    if (b) { escolhas[b.dataset.branco] = { tipo: "branco" }; atualizar(); }
+  };
+  raiz.onkeydown = (ev) => {
+    const li = ev.target.closest?.(".cand");
+    if (li && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); escolher(li); }
+  };
+  raiz.onchange = (ev) => {
+    const s = ev.target.closest("[data-legenda]");
+    if (!s) return;
+    if (s.value) { const [nr, sigla] = s.value.split("|"); escolhas[s.dataset.legenda] = { tipo: "legenda", nr, sigla }; }
+    else delete escolhas[s.dataset.legenda];
+    atualizar();
+  };
+  raiz.oninput = (ev) => {
+    const inp = ev.target.closest("[data-busca-vaga]");
+    if (!inp) return;
+    const q = normaliza(inp.value), dig = inp.value.replace(/\D/g, "");
+    for (const li of document.querySelectorAll(`#vaga-${inp.dataset.buscaVaga} .cand`)) {
+      const t = li.dataset.busca;
+      li.hidden = !!inp.value.trim() && !(q && t.includes(q)) && !(dig && t.split(" ").some((x) => x.startsWith(dig)));
+    }
+  };
+  atualizar();
+}
+
+function renderImpressao(el, topo, uf, vagas, escolhas, dados) {
+  const digitos = (nr, n) => `<span class="digitos">${String(nr || "").padStart(n, " ").split("").map((d) => `<i>${d.trim() ? esc(d) : "&nbsp;"}</i>`).join("")}</span>`;
+  const linhas = vagas.map((v) => {
+    const e = escolhas[v.id];
+    const nr = e?.tipo === "cand" || e?.tipo === "legenda" ? e.nr : "";
+    const desc = !e ? `<span class="vazio">(não escolhido)</span>` : e.tipo === "branco" ? "<b>BRANCO</b> — aperte a tecla BRANCO"
+      : e.tipo === "legenda" ? `Voto na legenda <b>${esc(e.sigla)}</b>` : `<b>${esc(e.nome)}</b> · ${esc(e.sigla)}`;
+    return `<tr><td class="c-cargo">${esc(v.rot)}</td><td>${digitos(nr, e?.tipo === "legenda" ? 2 : v.dig)}</td><td class="c-desc">${desc}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<div class="bloco nao-imprimir">${topo("Etapa 3 de 3 · Confira e imprima")}
+      <p class="muted">Confira os números. Use “Imprimir” (ou salvar como PDF) e leve a folha no dia da eleição.</p>
+      <div class="acoes"><button type="button" class="botao-primario" id="btn-imprimir">🖨️ Imprimir colinha</button>
+        <a class="botao-sec" href="#colinha=1&uf=${uf}">← Alterar escolhas</a></div></div>
+    <div id="colinha-imprimir" class="colinha-folha">
+      <div class="colinha-cab"><strong>MINHA COLINHA</strong><span>Eleições ${META.colinha.ano} · ${esc(NOMES_UF[uf] || uf)} · ${DATA_ELEICAO}</span></div>
+      <p class="colinha-ordem">Vote nesta ordem, digitando o número e apertando <b>CONFIRMA</b>:</p>
+      <table class="colinha-tab"><tbody>${linhas}</tbody></table>
+      <ul class="colinha-avisos">
+        <li>Leve esta folha impressa: <b>celular e outros aparelhos não podem entrar na cabine de votação</b>.</li>
+        <li>Leve um documento oficial com foto (ou o e-Título). Números conforme dados do TSE de ${esc(dados.data_tse || "—")} — confira antes de votar.</li>
+      </ul>
+      <div class="colinha-rodape">Gerado em lentepublica.com.br · Ferramenta informativa e neutra: todos os candidatos na urna são exibidos da mesma forma.</div>
+    </div>`;
+  $("#btn-imprimir").onclick = () => window.print();
+  window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
 }
 
 // Siglas no centro de cada estado (calculado depois que o SVG está na página)
@@ -1029,7 +1219,8 @@ const CAMPOS_FILTRO = ["uf", "ano", "cargo", "mun", "eleitos"];
 function lerHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   const f = Object.fromEntries(CAMPOS_FILTRO.map((k) => [k, h.get(k) || ""]));
-  return { q: h.get("q") || "", p: h.get("p"), pg: +(h.get("pg") || 1), partidos: h.has("partidos"), explorar: h.has("explorar"), f };
+  return { q: h.get("q") || "", p: h.get("p"), pg: +(h.get("pg") || 1), partidos: h.has("partidos"), explorar: h.has("explorar"),
+    colinha: h.has("colinha"), imprimir: h.has("imprimir"), f };
 }
 
 // Monta o hash de uma consulta (omitindo campos vazios)
@@ -1042,9 +1233,11 @@ function hashConsulta(q, f, extra = {}) {
 }
 
 async function rotear() {
-  const { q, p, pg, partidos, explorar, f } = lerHash();
+  const { q, p, pg, partidos, explorar, colinha, imprimir, f } = lerHash();
   $("#partidos").innerHTML = "";
+  document.body.classList.toggle("modo-colinha", colinha && p === null);
   if (partidos) { $("#explorar").innerHTML = ""; return mostrarPartidos(); }
+  if (colinha && p === null) { $("#q").dataset.ultima = ""; return mostrarColinha(f.uf, imprimir); }
   if (p !== null) {
     if (q) $("#q").value = q;
     $("#resultados").hidden = true;

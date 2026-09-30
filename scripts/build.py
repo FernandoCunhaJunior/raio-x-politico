@@ -51,7 +51,7 @@ TITULARES = {"PRESIDENTE", "GOVERNADOR", "PREFEITO", "SENADOR"}
 
 COLS_CAND = [
     "ANO_ELEICAO", "NM_TIPO_ELEICAO", "NR_TURNO", "CD_ELEICAO", "DS_ELEICAO",
-    "SG_UF", "SG_UE", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NR_CANDIDATO", "NM_CANDIDATO",
+    "SG_UF", "SG_UE", "NM_UE", "DS_CARGO", "SQ_CANDIDATO", "NR_CANDIDATO", "NM_CANDIDATO", "NR_PARTIDO",
     "NM_URNA_CANDIDATO", "NR_CPF_CANDIDATO", "DS_SITUACAO_CANDIDATURA",
     "SG_PARTIDO", "NM_PARTIDO", "DT_NASCIMENTO", "NR_TITULO_ELEITORAL_CANDIDATO",
     "DS_OCUPACAO", "DS_SIT_TOT_TURNO",
@@ -365,6 +365,7 @@ def carregar_candidaturas(raw, anos, bens, tab, receitas):
             "nr": df["NR_CANDIDATO"].to_numpy(),
             "sq": df["SQ_CANDIDATO"].to_numpy(),
             "uf": df["SG_UF"].to_numpy(),
+            "nr_partido": df["NR_PARTIDO"].to_numpy(),
         }))
         extra = f", {com_bens:.0%} com bens declarados" if com_bens is not None else ""
         log(f"candidaturas {ano}: {len(df):,}{extra}, {herdados:,} resultados de vice/suplente herdados do titular")
@@ -666,7 +667,59 @@ def chaves_busca(nome_norm, urnas_norm):
     return ks
 
 
-def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
+CARGOS_COLINHA = ["DEPUTADO FEDERAL", "DEPUTADO ESTADUAL", "DEPUTADO DISTRITAL", "SENADOR", "GOVERNADOR", "PRESIDENTE"]
+
+
+def gerar_colinha(col, chapas, tab, out, raw):
+    """data/colinha/AAAA_UF.json: candidatos que estão NA URNA na eleição mais recente (para montar a "colinha").
+
+    Usa consulta_cand_complementar_AAAA.zip (TSE): ST_CANDIDATO_INSERIDO_URNA e DS_SITUACAO_JULGAMENTO.
+    Cada candidato: [número, nome de urna, sigla, número do partido, pid, SQ, UE, situação (se não deferida), companheiros].
+    """
+    ano = int(col["ano"].max())
+    caminho = os.path.join(raw, f"consulta_cand_complementar_{ano}.zip")
+    if not os.path.exists(caminho):
+        log(f"colinha: {os.path.basename(caminho)} não encontrado — colinha desativada")
+        return None
+    comp = ler_csv(caminho, ["SQ_CANDIDATO", "ST_CANDIDATO_INSERIDO_URNA", "DS_SITUACAO_JULGAMENTO", "DT_GERACAO"])
+    situacao = dict(zip(comp["SQ_CANDIDATO"], zip(comp["ST_CANDIDATO_INSERIDO_URNA"], comp["DS_SITUACAO_JULGAMENTO"])))
+    data_tse = comp["DT_GERACAO"].max() if len(comp) else ""
+    cargo_norm = [normaliza(c) for c in tab["cargo"].itens]
+    siglas = [p.split("|")[0] for p in tab["partido"].itens]
+    por_uf, na_urna, fora = {}, 0, 0
+    for i in np.flatnonzero(col["ano"] == ano):
+        cargo = cargo_norm[col["cargo"][i]]
+        if cargo not in CARGOS_COLINHA:
+            continue
+        ins, julg = situacao.get(col["sq"][i], ("", ""))
+        if normaliza(ins) != "SIM":
+            fora += 1
+            continue
+        na_urna += 1
+        comp_txt = "; ".join(f"{cap_py(tab['cargo'].itens[c])}: {n}" for _, c, n in (chapas.get(int(i)) or []))
+        alerta = "" if normaliza(julg) == "DEFERIDO" else julg
+        uf = col["uf"][i] or "BR"
+        por_uf.setdefault(uf, {}).setdefault(cargo, []).append([
+            col["nr"][i], col["urna"][i] or col["nome"][i], siglas[col["partido"][i]], col["nr_partido"][i],
+            int(col["pid"][i]), col["sq"][i], col["sg_ue"][i], alerta, comp_txt])
+    os.makedirs(os.path.join(out, "colinha"), exist_ok=True)
+    for uf, cargos in por_uf.items():
+        for lista in cargos.values():
+            lista.sort(key=lambda x: normaliza(x[1]))
+        partidos = sorted({(c[3], c[2]) for k, l in cargos.items() if k.startswith("DEPUTADO") for c in l if c[3]},
+                          key=lambda x: int(x[0]) if x[0].isdigit() else 999)
+        with open(os.path.join(out, "colinha", f"{ano}_{uf}.json"), "w", encoding="utf-8") as f:
+            json.dump({"ano": ano, "data_tse": data_tse, "cargos": cargos, "partidos": partidos}, f,
+                      ensure_ascii=False, separators=(",", ":"))
+    log(f"colinha {ano}: {na_urna:,} candidatos na urna em {len(por_uf)} UFs ({fora:,} fora da urna excluídos)")
+    return {"ano": ano, "data_tse": data_tse, "ufs": sorted(por_uf)}
+
+
+def cap_py(s):
+    return " ".join(w if w.lower() in {"de", "da", "do"} else w.capitalize() for w in (s or "").lower().split())
+
+
+def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
     df["pessoa"] = rot
     df["nome_norm"] = nome_norm.to_numpy()
     df = df.sort_values(["pessoa", "ano"], kind="stable")
@@ -791,6 +844,9 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
 
     gerar_partidos(col, tab, out)
     listas = gerar_listas(col, out)
+    for c in ("nr", "urna", "nr_partido"):
+        col[c] = df[c].to_numpy()
+    colinha = gerar_colinha(col, chapas, tab, out, raw)
     anos = sorted(int(a) for a in np.unique(col["ano"]))
     meta = {
         "gerado_em": time.strftime("%Y-%m-%d"),
@@ -809,6 +865,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes):
         "sancoes_fontes": fontes_sancoes,  # {"CEIS": "AAAAMMDD", ...}
         "fotos_eleicoes": [e for _, _, e in ELEICOES_FOTO],  # índice usado nas referências de foto
         "listas": listas,  # {"2024": ["AC", "AL", ...]} — arquivos data/lista/AAAA_UF.json
+        "colinha": colinha,  # {"ano": 2026, "data_tse": "dd/mm/aaaa", "ufs": [...]} ou None
         "espectro": {
             "fonte": "Bolognesi, B.; Ribeiro, E.; Codato, A. Uma Nova Classificação Ideológica dos Partidos "
                      "Políticos Brasileiros. Dados, v. 66, n. 2, 2023.",
@@ -847,7 +904,7 @@ def main():
     df["cpf_mask"] = mascarar_cpf(df["cpf"])
     df = df.drop(columns=["cpf", "titulo"])  # CPF completo e título não saem daqui
     fontes = {cad.upper(): data for cad, (_, data) in arquivos_cgu.items()}
-    gerar(df, rot, nome_norm, tab, args.out, sancoes[0], fontes)
+    gerar(df, rot, nome_norm, tab, args.out, sancoes[0], fontes, args.raw)
 
 
 if __name__ == "__main__":
