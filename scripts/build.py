@@ -60,7 +60,8 @@ COLS_CAND = [
 ]
 COLS_BENS = ["SG_UE", "SQ_CANDIDATO", "VR_BEM_CANDIDATO", "DS_TIPO_BEM_CANDIDATO", "DS_BEM_CANDIDATO"]
 # Colunas que não existem em todos os anos (federações surgiram em 2022): ausentes viram "".
-COLS_OPCIONAIS = {"DS_COMPOSICAO_FEDERACAO", "DS_COMPOSICAO_COLIGACAO", "SG_UF_NASCIMENTO", "DS_COR_RACA"}
+COLS_OPCIONAIS = {"DS_COMPOSICAO_FEDERACAO", "DS_COMPOSICAO_COLIGACAO", "SG_UF_NASCIMENTO", "DS_COR_RACA",
+                  "NR_ORDEM_REDE_SOCIAL", "NR_ORDEM"}  # redes sociais: "NR_ORDEM" em 2022
 
 # Em 2006/2008 quase todo bem foi registrado como "Outros bens e direitos"; para esses tipos
 # genéricos a categoria é deduzida da descrição (texto sem acento, maiúsculo).
@@ -283,8 +284,9 @@ def carregar_redes(raw):
     for caminho in sorted(glob.glob(os.path.join(raw, "rede_social_candidato_*.zip"))):
         m = re.search(r"rede_social_candidato_(\d{4})", os.path.basename(caminho))
         ano = int(m.group(1))
-        df = ler_csv(caminho, ["SQ_CANDIDATO", "NR_ORDEM_REDE_SOCIAL", "DS_URL"])
-        df["ordem"] = pd.to_numeric(df["NR_ORDEM_REDE_SOCIAL"], errors="coerce").fillna(99)
+        df = ler_csv(caminho, ["SQ_CANDIDATO", "NR_ORDEM_REDE_SOCIAL", "NR_ORDEM", "DS_URL"])
+        ordem = df["NR_ORDEM_REDE_SOCIAL"].where(df["NR_ORDEM_REDE_SOCIAL"] != "", df["NR_ORDEM"])
+        df["ordem"] = pd.to_numeric(ordem, errors="coerce").fillna(99)
         for sq, g in df.sort_values("ordem").groupby("SQ_CANDIDATO"):
             vistos, urls = set(), []
             for u in map(normalizar_url, g["DS_URL"]):
