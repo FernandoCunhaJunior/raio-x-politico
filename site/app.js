@@ -516,6 +516,50 @@ const VAGAS_COLINHA = [
 ];
 const DATA_ELEICAO = "4 de outubro de 2026 (1º turno)";
 
+// Filtro da colinha por espectro da legenda: as 7 faixas do estudo agrupadas em 5 (+ "sem classificação").
+const GRUPOS_ESPECTRO = ["Esquerda", "Centro-esquerda", "Centro", "Centro-direita", "Direita", "Sem classificação"];
+function grupoEspectro(sigla, ano) {
+  const r = regraPartido(sigla, ano);
+  if (!r) return "Sem classificação";
+  const f = faixaDe(r[3]);
+  return f === "Extrema-esquerda" ? "Esquerda" : f === "Extrema-direita" ? "Direita" : f;
+}
+let filtroEspectro = new Set(GRUPOS_ESPECTRO); // todos marcados por padrão
+
+function barraEspectro() {
+  return `<div class="bloco filtro-espectro">
+    <h3>Filtrar pelo espectro do partido</h3>
+    <div class="chips-espectro" role="group" aria-label="Espectro do partido">
+      ${GRUPOS_ESPECTRO.map((g, i) => `<button type="button" class="chip-esp esp-${i}" data-grupo="${esc(g)}" aria-pressed="${filtroEspectro.has(g)}">${esc(g)}</button>`).join("")}
+      <button type="button" class="chip-esp-todos" data-grupo="*">Todos</button>
+    </div>
+    <p class="nota">Marque um ou mais grupos. A classificação é do <strong>partido</strong> (não da pessoa), segundo
+      <a href="#partidos=1">Bolognesi, Ribeiro e Codato (2023)</a>; “Esquerda” inclui a extrema-esquerda e “Direita” inclui a
+      extrema-direita. Partidos não avaliados no estudo (ex.: União Brasil, PRD, Missão) estão em “Sem classificação”.</p>
+  </div>`;
+}
+
+// Aplica busca por texto (por vaga) + filtro de espectro (global) às listas da colinha
+function aplicarFiltrosColinha() {
+  document.querySelectorAll(".chip-esp").forEach((b) => b.setAttribute("aria-pressed", filtroEspectro.has(b.dataset.grupo)));
+  document.querySelectorAll(".vaga").forEach((sec) => {
+    const inp = sec.querySelector("[data-busca-vaga]");
+    const txt = inp?.value.trim() || "";
+    const q = normaliza(txt), dig = txt.replace(/\D/g, "");
+    let visiveis = 0;
+    sec.querySelectorAll(".cand").forEach((li) => {
+      const t = li.dataset.busca;
+      const okTxt = !txt || (q && t.includes(q)) || (dig && t.split(" ").some((x) => x.startsWith(dig)));
+      const okEsp = filtroEspectro.has(li.dataset.grupo) || li.classList.contains("sel");
+      li.hidden = !(okTxt && okEsp);
+      if (!li.hidden) visiveis++;
+    });
+    sec.querySelectorAll("[data-legenda] option[data-grupo]").forEach((o) => { o.hidden = !filtroEspectro.has(o.dataset.grupo); });
+    const vazio = sec.querySelector(".lista-vazia");
+    if (vazio) vazio.hidden = visiveis > 0;
+  });
+}
+
 const chaveColinha = (uf) => `colinha_${META.colinha?.ano}_${uf}`;
 function lerEscolhas(uf) { try { return JSON.parse(localStorage.getItem(chaveColinha(uf)) || "{}"); } catch { return {}; } }
 function salvarEscolhas(uf, e) { try { localStorage.setItem(chaveColinha(uf), JSON.stringify(e)); } catch { /* navegação privada */ } }
@@ -559,6 +603,7 @@ async function mostrarColinha(uf, imprimir) {
   el.innerHTML = `<div class="bloco explorar">${topo("Etapa 2 de 3 · Escolha seus candidatos")}
     <p class="muted">Candidatos que estão na urna, em ordem alfabética. Toque em um nome para escolher; toque de novo para desfazer.
       Dados do TSE de ${esc(dados.data_tse || "—")}.</p></div>
+    ${barraEspectro()}
     ${vagas.map((v) => secaoVaga(v, dados, escolhas)).join("")}
     <div class="barra-colinha"><span id="colinha-contador"></span>
       <a class="botao-primario" href="#colinha=1&uf=${uf}&imprimir=1">Ver e imprimir minha colinha →</a></div>`;
@@ -573,9 +618,10 @@ function secaoVaga(v, dados, escolhas) {
     const [nr, nome, sigla, , pid, sq, ue, alerta, comp] = c;
     const grave = alerta && !/^DEFERIDO/.test(normaliza(alerta));
     const sel = esc0?.tipo === "cand" && esc0.nr === nr;
-    return `<li class="cand${sel ? " sel" : ""}" data-vaga="${v.id}" data-k="${k}" data-busca="${esc(normaliza(nome) + " " + nr + " " + normaliza(sigla))}" tabindex="0" role="button" aria-pressed="${sel}">
+    const grupo = grupoEspectro(sigla, dados.ano);
+    return `<li class="cand${sel ? " sel" : ""}" data-vaga="${v.id}" data-k="${k}" data-grupo="${esc(grupo)}" data-busca="${esc(normaliza(nome) + " " + nr + " " + normaliza(sigla))}" tabindex="0" role="button" aria-pressed="${sel}">
       <img loading="lazy" referrerpolicy="no-referrer" alt="" src="${FOTO_BASE}/${META.fotos_eleicoes[META.fotos_eleicoes.length - 1]}/${esc(sq)}/${esc(ue)}">
-      <span class="cand-info"><strong>${esc(nome)}</strong><small>${esc(sigla)}${comp ? ` · ${esc(comp)}` : ""}</small>
+      <span class="cand-info"><strong>${esc(nome)}</strong><small>${esc(sigla)} <span class="tag-esp esp-${GRUPOS_ESPECTRO.indexOf(grupo)}">${esc(grupo)}</span>${comp ? ` · ${esc(comp)}` : ""}</small>
         ${alerta ? `<em class="${grave ? "grave" : "leve"}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>` : ""}</span>
       <span class="cand-num">${esc(nr)}</span>
       <a class="cand-ficha" href="#${new URLSearchParams({ q: nome, p: pid })}" title="Ver ficha">ficha</a>
@@ -583,13 +629,14 @@ function secaoVaga(v, dados, escolhas) {
   }).join("");
   const legenda = v.legenda ? `<label class="legenda-sel">ou votar só no partido (legenda):
       <select data-legenda="${v.id}"><option value="">—</option>${(dados.partidos || []).map(([n, s]) =>
-        `<option value="${esc(n)}|${esc(s)}" ${esc0?.tipo === "legenda" && esc0.nr === n ? "selected" : ""}>${esc(n)} · ${esc(s)}</option>`).join("")}</select></label>` : "";
+        `<option value="${esc(n)}|${esc(s)}" data-grupo="${esc(grupoEspectro(s, dados.ano))}" ${esc0?.tipo === "legenda" && esc0.nr === n ? "selected" : ""}>${esc(n)} · ${esc(s)}</option>`).join("")}</select></label>` : "";
   return `<section class="bloco vaga" id="vaga-${v.id}">
     <div class="vaga-topo"><h3>${esc(v.rot)} <small>${v.dig} dígitos · ${lista.length} candidatos</small></h3>
       <span class="vaga-escolha" id="escolha-${v.id}"></span></div>
     <div class="vaga-ctrl"><input type="search" placeholder="Buscar por nome, número ou partido" data-busca-vaga="${v.id}" aria-label="Buscar em ${esc(v.rot)}">
       ${legenda}<button type="button" class="branco" data-branco="${v.id}">Em branco</button></div>
     <ul class="lista-cand">${linhas}</ul>
+    <p class="muted lista-vazia" hidden>Nenhum candidato com os filtros escolhidos.</p>
   </section>`;
 }
 
@@ -622,6 +669,7 @@ function ligarColinha(uf, vagas, dados) {
       if (sel) sel.value = e?.tipo === "legenda" ? `${e.nr}|${e.sigla}` : "";
     }
     $("#colinha-contador").textContent = `${n} de ${vagas.length} escolhas feitas`;
+    aplicarFiltrosColinha();
   };
   const escolher = (li) => {
     if (li.classList.contains("bloqueado")) return;
@@ -635,6 +683,15 @@ function ligarColinha(uf, vagas, dados) {
   const raiz = $("#explorar");
   raiz.onclick = (ev) => {
     if (ev.target.closest(".cand-ficha")) return; // o link da ficha segue normalmente
+    const chip = ev.target.closest("[data-grupo]:is(.chip-esp, .chip-esp-todos)");
+    if (chip) {
+      const g = chip.dataset.grupo;
+      if (g === "*") filtroEspectro = new Set(GRUPOS_ESPECTRO);
+      else if (filtroEspectro.size === GRUPOS_ESPECTRO.length) filtroEspectro = new Set([g]); // 1º clique: mostra só este grupo
+      else if (filtroEspectro.has(g)) { filtroEspectro.delete(g); if (!filtroEspectro.size) filtroEspectro = new Set(GRUPOS_ESPECTRO); }
+      else filtroEspectro.add(g);
+      return aplicarFiltrosColinha();
+    }
     const li = ev.target.closest(".cand");
     if (li) return escolher(li);
     const b = ev.target.closest("[data-branco]");
@@ -651,16 +708,9 @@ function ligarColinha(uf, vagas, dados) {
     else delete escolhas[s.dataset.legenda];
     atualizar();
   };
-  raiz.oninput = (ev) => {
-    const inp = ev.target.closest("[data-busca-vaga]");
-    if (!inp) return;
-    const q = normaliza(inp.value), dig = inp.value.replace(/\D/g, "");
-    for (const li of document.querySelectorAll(`#vaga-${inp.dataset.buscaVaga} .cand`)) {
-      const t = li.dataset.busca;
-      li.hidden = !!inp.value.trim() && !(q && t.includes(q)) && !(dig && t.split(" ").some((x) => x.startsWith(dig)));
-    }
-  };
+  raiz.oninput = (ev) => { if (ev.target.closest("[data-busca-vaga]")) aplicarFiltrosColinha(); };
   atualizar();
+  aplicarFiltrosColinha();
 }
 
 function renderImpressao(el, topo, uf, vagas, escolhas, dados) {
