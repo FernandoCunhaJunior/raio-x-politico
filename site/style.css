@@ -171,34 +171,42 @@ a { color: var(--link); }
 .tag-esp { display: inline-block; font-size: .7rem; padding: 0 6px; border-radius: 999px; border: 1px solid var(--c); color: var(--muted); margin-left: 2px; }
 
 /* Colinha — folha para impressão */
-.colinha-folha { max-width: 720px; margin: 14px auto; background: #fff; color: #111; border: 2px dashed #999; border-radius: 12px; padding: 22px 24px; }
-.colinha-cab { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px; border-bottom: 3px solid #111; padding-bottom: 8px; }
-.colinha-cab strong { font-size: 1.5rem; letter-spacing: .06em; }
-.colinha-cab span { font-size: .9rem; }
-.colinha-ordem { margin: 10px 0; font-size: .92rem; }
-.colinha-tab { width: 100%; border-collapse: collapse; }
-.colinha-tab td { border-bottom: 1px solid #ccc; padding: 10px 6px; vertical-align: middle; white-space: normal; }
-.colinha-tab .c-cargo { font-weight: 700; width: 30%; }
-.colinha-tab .c-desc { font-size: .92rem; }
-.colinha-tab .vazio { color: #888; }
-.digitos { display: inline-flex; gap: 4px; }
-.digitos i { font-style: normal; display: grid; place-items: center; width: 30px; height: 38px; border: 2px solid #111; border-radius: 6px;
-  font-size: 1.4rem; font-weight: 800; font-family: ui-monospace, "Consolas", monospace; }
-.colinha-avisos { margin: 12px 0 6px; padding-left: 18px; font-size: .82rem; }
-.colinha-rodape { font-size: .72rem; color: #666; border-top: 1px solid #ddd; padding-top: 6px; }
+/* Cartão de bolso: 90 × 130 mm (mesmo tamanho na tela e na impressão) */
+.colinha-recorte { width: 90mm; margin: 14px auto 2px; font-size: 8pt; color: #777; }
+.colinha-folha {
+  width: 90mm; min-height: 130mm; margin: 0 auto 14px; box-sizing: border-box; background: #fff; color: #111;
+  border: 1.5px dashed #888; border-radius: 3mm; padding: 4mm 4.5mm; font-size: 8.5pt; line-height: 1.25;
+  display: flex; flex-direction: column;
+}
+.colinha-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; border-bottom: 2px solid #111; padding-bottom: 1.5mm; }
+.colinha-cab strong { font-size: 12pt; letter-spacing: .04em; }
+.colinha-cab span { font-size: 8pt; white-space: nowrap; }
+.colinha-ordem { margin: 1.8mm 0 1mm; font-size: 7.5pt; }
+.cl-lista { flex: 1; display: flex; flex-direction: column; }
+.cl-linha { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "cargo num" "nome num"; align-items: center;
+  column-gap: 2mm; padding: 1.6mm 0; border-bottom: 1px solid #ccc; }
+.cl-cargo { grid-area: cargo; font-weight: 800; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .02em; }
+.cl-nome { grid-area: nome; font-size: 7.5pt; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-nome .vazio { color: #999; }
+.cl-linha .digitos { grid-area: num; }
+.digitos { display: inline-flex; gap: 1mm; }
+.digitos i { font-style: normal; display: grid; place-items: center; width: 5.8mm; height: 7.4mm; border: 1.5px solid #111; border-radius: 1mm;
+  font-size: 12pt; font-weight: 800; font-family: ui-monospace, "Consolas", monospace; }
+.colinha-rodape { margin-top: 2mm; font-size: 6.2pt; color: #555; line-height: 1.3; }
 
 @media print {
+  @page { size: A4; margin: 12mm; }
   body { background: #fff; }
   body.modo-colinha .barra-marca, body.modo-colinha .hero, body.modo-colinha .rodape, body.modo-colinha .nao-imprimir,
   body.modo-colinha #status, body.modo-colinha #inicio { display: none !important; }
-  body.modo-colinha .colinha-folha { border: 1px dashed #999; margin: 0 auto; box-shadow: none; }
+  body.modo-colinha .conteudo { padding: 0; min-height: 0; }
+  body.modo-colinha .colinha-recorte, body.modo-colinha .colinha-folha { margin-left: 0; }
+  body.modo-colinha .colinha-folha { box-shadow: none; break-inside: avoid; }
   .digitos i { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 @media (max-width: 560px) {
   .cand { grid-template-columns: 38px 1fr auto; }
   .cand-ficha { grid-column: 2; }
-  .colinha-tab .c-cargo { width: auto; }
-  .digitos i { width: 24px; height: 32px; font-size: 1.1rem; }
 }
 
 /* Botão "Explorar pelo mapa" (capa) */

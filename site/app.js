@@ -506,13 +506,13 @@ async function etapaMapa(link = (uf) => hashExplorar({ uf }), extra = null) {
 
 // Ordem de votação na urna (eleições gerais). Senador tem duas vagas em 2026.
 const VAGAS_COLINHA = [
-  { id: "DF", cargo: "DEPUTADO FEDERAL", rot: "Deputado(a) federal", dig: 4, legenda: true },
-  { id: "DE", cargo: "DEPUTADO ESTADUAL", rot: "Deputado(a) estadual", dig: 5, legenda: true },
-  { id: "DD", cargo: "DEPUTADO DISTRITAL", rot: "Deputado(a) distrital", dig: 5, legenda: true },
-  { id: "S1", cargo: "SENADOR", rot: "Senador(a) — 1º voto", dig: 3 },
-  { id: "S2", cargo: "SENADOR", rot: "Senador(a) — 2º voto", dig: 3 },
-  { id: "GV", cargo: "GOVERNADOR", rot: "Governador(a)", dig: 2 },
-  { id: "PR", cargo: "PRESIDENTE", rot: "Presidente da República", dig: 2 },
+  { id: "DF", cargo: "DEPUTADO FEDERAL", rot: "Deputado(a) federal", curto: "Dep. Federal", dig: 4, legenda: true },
+  { id: "DE", cargo: "DEPUTADO ESTADUAL", rot: "Deputado(a) estadual", curto: "Dep. Estadual", dig: 5, legenda: true },
+  { id: "DD", cargo: "DEPUTADO DISTRITAL", rot: "Deputado(a) distrital", curto: "Dep. Distrital", dig: 5, legenda: true },
+  { id: "S1", cargo: "SENADOR", rot: "Senador(a) — 1º voto", curto: "Senador · 1º voto", dig: 3 },
+  { id: "S2", cargo: "SENADOR", rot: "Senador(a) — 2º voto", curto: "Senador · 2º voto", dig: 3 },
+  { id: "GV", cargo: "GOVERNADOR", rot: "Governador(a)", curto: "Governador", dig: 2 },
+  { id: "PR", cargo: "PRESIDENTE", rot: "Presidente da República", curto: "Presidente", dig: 2 },
 ];
 const DATA_ELEICAO = "4 de outubro de 2026 (1º turno)";
 
@@ -769,23 +769,22 @@ function renderImpressao(el, topo, uf, vagas, escolhas, dados) {
   const linhas = vagas.map((v) => {
     const e = escolhas[v.id];
     const nr = e?.tipo === "cand" || e?.tipo === "legenda" ? e.nr : "";
-    const desc = !e ? `<span class="vazio">(não escolhido)</span>` : e.tipo === "branco" ? "<b>BRANCO</b> — aperte a tecla BRANCO"
-      : e.tipo === "legenda" ? `Voto na legenda <b>${esc(e.sigla)}</b>` : `<b>${esc(e.nome)}</b> · ${esc(e.sigla)}`;
-    return `<tr><td class="c-cargo">${esc(v.rot)}</td><td>${digitos(nr, e?.tipo === "legenda" ? 2 : v.dig)}</td><td class="c-desc">${desc}</td></tr>`;
+    const desc = !e ? `<span class="vazio">não escolhido</span>` : e.tipo === "branco" ? "<b>BRANCO</b> (tecla BRANCO)"
+      : e.tipo === "legenda" ? `Legenda <b>${esc(e.sigla)}</b>` : `<b>${esc(e.nome)}</b> · ${esc(e.sigla)}`;
+    return `<div class="cl-linha"><span class="cl-cargo">${esc(v.curto || v.rot)}</span>${digitos(nr, e?.tipo === "legenda" ? 2 : v.dig)}<span class="cl-nome">${desc}</span></div>`;
   }).join("");
+  const [aaaa, mm, dd] = (dados.data_tse || "").split("/").reverse();
   el.innerHTML = `<div class="bloco nao-imprimir">${topo("Etapa 3 de 3 · Confira e imprima")}
-      <p class="muted">Confira os números. Use “Imprimir” (ou salvar como PDF) e leve a folha no dia da eleição.</p>
+      <p class="muted">Confira os números. A colinha sai no <b>tamanho de bolso (9 × 13 cm)</b>: imprima em folha A4 comum e recorte na linha
+        tracejada. Também dá para “salvar como PDF”.</p>
       <div class="acoes"><button type="button" class="botao-primario" id="btn-imprimir">🖨️ Imprimir colinha</button>
         <a class="botao-sec" href="#colinha=1&uf=${uf}">← Alterar escolhas</a></div></div>
+    <div class="colinha-recorte">✂ recorte na linha tracejada</div>
     <div id="colinha-imprimir" class="colinha-folha">
-      <div class="colinha-cab"><strong>MINHA COLINHA</strong><span>Eleições ${META.colinha.ano} · ${esc(NOMES_UF[uf] || uf)} · ${DATA_ELEICAO}</span></div>
-      <p class="colinha-ordem">Vote nesta ordem, digitando o número e apertando <b>CONFIRMA</b>:</p>
-      <table class="colinha-tab"><tbody>${linhas}</tbody></table>
-      <ul class="colinha-avisos">
-        <li>Leve esta folha impressa: <b>celular e outros aparelhos não podem entrar na cabine de votação</b>.</li>
-        <li>Leve um documento oficial com foto (ou o e-Título). Números conforme dados do TSE de ${esc(dados.data_tse || "—")} — confira antes de votar.</li>
-      </ul>
-      <div class="colinha-rodape">Gerado em lentepublica.com.br · Ferramenta informativa e neutra: todos os candidatos na urna são exibidos da mesma forma.</div>
+      <div class="colinha-cab"><strong>MINHA COLINHA</strong><span>${esc(uf)} · 4/10/2026 · 1º turno</span></div>
+      <p class="colinha-ordem">Digite o número e aperte <b>CONFIRMA</b>, nesta ordem:</p>
+      <div class="cl-lista">${linhas}</div>
+      <div class="colinha-rodape">Celular não entra na cabine · leve documento com foto · dados TSE ${esc(dd && mm ? `${dd}/${mm}` : "—")} · lentepublica.com.br</div>
     </div>`;
   $("#btn-imprimir").onclick = () => window.print();
   window.scrollTo({ top: $(".conteudo").offsetTop - 8 });
