@@ -79,15 +79,50 @@ async function localizar(tk) {
 
 async function pessoa(pid) {
   const lote = await getJson(`data/p/${Math.floor(pid / META.por_arquivo)}.json`);
-  const [nome, urnas, anoNasc, ocupacao, cands, cpf, perfil, sancoes, fotos] = lote[pid % META.por_arquivo];
+  const [nome, urnas, anoNasc, ocupacao, cands, cpf, perfil, sancoes, refs, redes] = lote[pid % META.por_arquivo];
   const T = META.tabelas;
   const [genero, instrucao, cor, ufNasc] = perfil || [0, 0, 0, ""];
-  return {
+  const p = {
     pid, nome, urnas, anoNasc, cpf, ocupacao: T.ocupacao[ocupacao], cands: cands.map(candidatura),
     perfil: { genero: T.genero?.[genero], instrucao: T.instrucao?.[instrucao], cor: T.cor?.[cor], ufNasc },
     sancoes: (sancoes || []).map(sancao),
-    fotos: (fotos || []).map(([k, sq, ue]) => `${FOTO_BASE}/${META.fotos_eleicoes[k]}/${sq}/${ue}`),
+    fotos: (refs || []).slice(0, 3).map(([k, sq, ue]) => `${FOTO_BASE}/${META.fotos_eleicoes[k]}/${sq}/${ue}`),
+    redes: redes || [],
   };
+  // Link da página oficial no TSE (DivulgaCandContas) de cada candidatura com referência
+  for (const [k, sq, ue] of refs || []) {
+    const ano = META.fotos_anos?.[k];
+    const c = p.cands.find((x) => x.ano === ano && !x.eleicao && !x.linkTse);
+    if (c) c.linkTse = linkDivulga(META.fotos_eleicoes[k], sq, ano, c.uf || "BR", ue);
+  }
+  return p;
+}
+
+// ---------- Página oficial do candidato no TSE e redes sociais ----------
+
+// O DivulgaCandContas ignora o segmento de região; usamos "BRASIL".
+const linkDivulga = (eleicaoId, sq, ano, uf, ue) =>
+  `https://divulgacandcontas.tse.jus.br/divulga/#/candidato/BRASIL/${encodeURIComponent(uf)}/${eleicaoId}/${encodeURIComponent(sq)}/${ano}/${encodeURIComponent(ue)}`;
+const CARGOS_COM_PROPOSTA = /^(PRESIDENTE|GOVERNADOR|PREFEITO)$/;
+const temProposta = (cargo) => CARGOS_COM_PROPOSTA.test(normaliza(cargo || ""));
+
+const REDES_CONHECIDAS = [
+  [/instagram\.com/, "Instagram", "IG"], [/facebook\.com|fb\.com/, "Facebook", "FB"], [/(^|\.)x\.com|twitter\.com/, "X (Twitter)", "X"],
+  [/youtube\.com|youtu\.be/, "YouTube", "YT"], [/tiktok\.com/, "TikTok", "TT"], [/threads\.(net|com)/, "Threads", "@"],
+  [/linkedin\.com/, "LinkedIn", "in"], [/t\.me|telegram/, "Telegram", "TG"], [/wa\.me|whatsapp/, "WhatsApp", "WA"],
+  [/kwai/, "Kwai", "KW"], [/spotify/, "Spotify", "SP"], [/flickr/, "Flickr", "FL"],
+];
+function infoRede(url) {
+  let host = "";
+  try { host = new URL(url).hostname.replace(/^www\./, ""); } catch { return null; }
+  const r = REDES_CONHECIDAS.find(([re]) => re.test(host));
+  return r ? { nome: r[1], sigla: r[2], host } : { nome: host, sigla: "🌐", host };
+}
+function iconesRedes(urls, max = 12) {
+  const itens = (urls || []).map((u) => ({ u, i: infoRede(u) })).filter((x) => x.i && /^https?:\/\//i.test(x.u)).slice(0, max);
+  if (!itens.length) return "";
+  return `<span class="redes">${itens.map(({ u, i }) =>
+    `<a class="rede rede-${esc(i.sigla.replace(/\W/g, "") || "web")}" href="${esc(u)}" target="_blank" rel="noopener nofollow ugc" title="${esc(i.nome)}: ${esc(u)}">${esc(i.sigla)}</a>`).join("")}</span>`;
 }
 
 // ---------- Fotos (servidas pelo DivulgaCandContas/TSE, direto no navegador do visitante) ----------
@@ -642,16 +677,19 @@ function secaoVaga(v, dados, escolhas) {
   const lista = dados.cargos[v.cargo] || [];
   const esc0 = escolhas[v.id];
   const linhas = lista.map((c, k) => {
-    const [nr, nome, sigla, , pid, sq, ue, alerta, comp] = c;
+    const [nr, nome, sigla, , pid, sq, ue, alerta, comp, redes] = c;
     const grave = alerta && !/^DEFERIDO/.test(normaliza(alerta));
     const sel = esc0?.tipo === "cand" && esc0.nr === nr;
     const grupo = grupoEspectro(sigla, dados.ano);
+    const tse = linkDivulga(META.fotos_eleicoes[META.fotos_eleicoes.length - 1], sq, dados.ano, ue, ue);
     return `<li class="cand${sel ? " sel" : ""}" data-vaga="${v.id}" data-k="${k}" data-grupo="${esc(grupo)}" data-partido="${esc(c[3])}" data-busca="${esc(normaliza(nome) + " " + nr + " " + normaliza(sigla))}" tabindex="0" role="button" aria-pressed="${sel}">
       <img loading="lazy" referrerpolicy="no-referrer" alt="" src="${FOTO_BASE}/${META.fotos_eleicoes[META.fotos_eleicoes.length - 1]}/${esc(sq)}/${esc(ue)}">
       <span class="cand-info"><strong>${esc(nome)}</strong><small>${esc(sigla)} <span class="tag-esp esp-${GRUPOS_ESPECTRO.indexOf(grupo)}">${esc(grupo)}</span>${comp ? ` · ${esc(comp)}` : ""}</small>
-        ${alerta ? `<em class="${grave ? "grave" : "leve"}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>` : ""}</span>
+        ${alerta ? `<em class="${grave ? "grave" : "leve"}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>` : ""}
+        <span class="cand-links">${iconesRedes(redes, 8)}<a class="cand-tse" href="${esc(tse)}" target="_blank" rel="noopener"
+          title="Página oficial do candidato no TSE">${temProposta(v.cargo) ? "📄 proposta de governo" : "página no TSE"} ↗</a></span></span>
       <span class="cand-num">${esc(nr)}</span>
-      <a class="cand-ficha" href="#${new URLSearchParams({ q: nome, p: pid })}" title="Ver ficha">ficha</a>
+      <a class="cand-ficha" href="#${new URLSearchParams({ q: nome, p: pid })}" title="Ver ficha no Lente Pública">ficha</a>
     </li>`;
   }).join("");
   const legenda = v.legenda ? `<label class="legenda-sel" title="Mostra só os candidatos do partido. Se você não escolher um candidato, a colinha registra o voto na legenda (número do partido).">Partido:
@@ -724,7 +762,7 @@ function ligarColinha(uf, vagas, dados) {
   };
   const raiz = $("#explorar");
   raiz.onclick = (ev) => {
-    if (ev.target.closest(".cand-ficha")) return; // o link da ficha segue normalmente
+    if (ev.target.closest(".cand-ficha, .cand-tse, .redes a")) return; // links (ficha, TSE, redes) seguem normalmente
     const chip = ev.target.closest("[data-grupo]:is(.chip-esp, .chip-esp-todos)");
     if (chip) {
       const g = chip.dataset.grupo;
@@ -1040,6 +1078,12 @@ async function mostrarFicha(pid, unica = false) {
         <h2>${esc(cap(p.nome))}</h2>
         <div class="linha">${p.urnas.length ? `Nome de urna: ${p.urnas.map((u) => `“${esc(u)}”`).join(", ")}` : ""}
           ${p.cpf ? ` · CPF: ${esc(p.cpf)}` : ""}</div>
+        ${(() => {
+          const ult = [...p.cands].reverse().find((c) => c.linkTse);
+          const redes = iconesRedes(p.redes);
+          return redes || ult ? `<div class="links-topo">${redes ? `<span class="muted">Redes declaradas ao TSE:</span> ${redes}` : ""}
+            ${ult ? `<a class="link-tse-topo" href="${esc(ult.linkTse)}" target="_blank" rel="noopener">${temProposta(ult.cargo) ? "📄 Proposta de governo" : "Página oficial"} no TSE (${ult.ano}) ↗</a>` : ""}</div>` : "";
+        })()}
         <div class="selos-topo">
           ${r.eleicoes.length ? `<span class="selo ok">eleito(a) ${r.eleicoes.length}×</span>` : `<span class="selo neutro">nunca eleito(a)</span>`}
           ${trocas ? `<span class="selo neutro">${trocas} troca${trocas > 1 ? "s" : ""} de partido</span>` : ""}
@@ -1259,7 +1303,8 @@ function linhaCand(c) {
   const colig = c.coligacao ? `<div class="colig" title="Coligação/federação">${esc(c.coligacao)}</div>` : "";
   return `<tr class="${c.eleito ? "eleito" : ""}${problema ? " problema" : ""}">
     <td>${c.ano}${c.eleicao ? `<div class="muted">${esc(cap(c.eleicao))}</div>` : ""}</td>
-    <td>${esc(cap(c.cargo))}</td><td>${esc(localTexto(c))}</td>
+    <td>${esc(cap(c.cargo))}${c.linkTse ? `<div><a class="link-tse" href="${esc(c.linkTse)}" target="_blank" rel="noopener"
+      title="Página oficial desta candidatura no TSE">${temProposta(c.cargo) ? "📄 proposta" : "TSE"} ↗</a></div>` : ""}</td><td>${esc(localTexto(c))}</td>
     <td class="partido-cel" title="${esc(c.nomePartido)}"><strong>${esc(c.sigla)}</strong>${colig}</td>
     <td>${res}${sit}</td><td class="chapa-cel">${chapaHtml(c)}</td><td class="num">${bens}</td></tr>`;
 }

@@ -266,6 +266,37 @@ def carregar_receitas(raw, anos):
     return receitas
 
 
+def normalizar_url(u):
+    """Corrige esquema/host (o TSE grava muitas URLs em maiúsculas) e adiciona https:// se faltar."""
+    u = (u or "").strip()
+    if not u:
+        return ""
+    if not re.match(r"(?i)https?://", u):
+        u = "https://" + u
+    m = re.match(r"(?i)(https?://)([^/]+)(.*)", u)
+    return (m.group(1).lower() + m.group(2).lower() + m.group(3)) if m else u
+
+
+def carregar_redes(raw):
+    """{(ano, SQ_CANDIDATO): [urls]} a partir de rede_social_candidato_AAAA[_UF].zip (TSE, 2022+)."""
+    redes = {}
+    for caminho in sorted(glob.glob(os.path.join(raw, "rede_social_candidato_*.zip"))):
+        m = re.search(r"rede_social_candidato_(\d{4})", os.path.basename(caminho))
+        ano = int(m.group(1))
+        df = ler_csv(caminho, ["SQ_CANDIDATO", "NR_ORDEM_REDE_SOCIAL", "DS_URL"])
+        df["ordem"] = pd.to_numeric(df["NR_ORDEM_REDE_SOCIAL"], errors="coerce").fillna(99)
+        for sq, g in df.sort_values("ordem").groupby("SQ_CANDIDATO"):
+            vistos, urls = set(), []
+            for u in map(normalizar_url, g["DS_URL"]):
+                k = u.lower().rstrip("/")
+                if u and k not in vistos:
+                    vistos.add(k)
+                    urls.append(u)
+            redes.setdefault((ano, sq), []).extend(urls[:10])
+    log(f"redes sociais: {len(redes):,} candidaturas com links declarados")
+    return redes
+
+
 def carregar_correcoes():
     caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "correcoes.csv")
     return pd.read_csv(caminho, sep=";", dtype=str, comment="#", keep_default_na=False)
@@ -672,7 +703,7 @@ def chaves_busca(nome_norm, urnas_norm):
 CARGOS_COLINHA = ["DEPUTADO FEDERAL", "DEPUTADO ESTADUAL", "DEPUTADO DISTRITAL", "SENADOR", "GOVERNADOR", "PRESIDENTE"]
 
 
-def gerar_colinha(col, chapas, tab, out, raw):
+def gerar_colinha(col, chapas, tab, out, raw, redes=None):
     """data/colinha/AAAA_UF.json: candidatos que estão NA URNA na eleição mais recente (para montar a "colinha").
 
     Usa consulta_cand_complementar_AAAA.zip (TSE): ST_CANDIDATO_INSERIDO_URNA e DS_SITUACAO_JULGAMENTO.
@@ -703,7 +734,8 @@ def gerar_colinha(col, chapas, tab, out, raw):
         uf = col["uf"][i] or "BR"
         por_uf.setdefault(uf, {}).setdefault(cargo, []).append([
             col["nr"][i], col["urna"][i] or col["nome"][i], siglas[col["partido"][i]], col["nr_partido"][i],
-            int(col["pid"][i]), col["sq"][i], col["sg_ue"][i], alerta, comp_txt])
+            int(col["pid"][i]), col["sq"][i], col["sg_ue"][i], alerta, comp_txt,
+            (redes or {}).get((ano, col["sq"][i]), [])])
     os.makedirs(os.path.join(out, "colinha"), exist_ok=True)
     for uf, cargos in por_uf.items():
         for lista in cargos.values():
@@ -746,7 +778,8 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
             "genero", "instrucao", "cor", "uf_nasc", "coligacao", "sanc", "sq", "sg_ue", "uf",
             "rec_total", "rec_fefc", "rec_fp",
             *[f"b{i}" for i in range(n_cat)]]}
-    com_sancao = com_foto = 0
+    com_sancao = com_foto = com_redes = 0
+    redes = carregar_redes(raw)
     inicios = np.flatnonzero(np.r_[True, col["pid"][1:] != col["pid"][:-1]])
     fins = np.r_[inicios[1:], len(df)]
 
@@ -802,17 +835,23 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
         ids_sanc = sorted({j for x in col["sanc"][a:b] if isinstance(x, list) for j in x})
         pessoa.append([registros_sancoes[j] for j in ids_sanc] if ids_sanc else None)
         com_sancao += bool(ids_sanc)
-        # Referências de foto (DivulgaCandContas) das candidaturas mais recentes: [eleição, SQ, UE]
+        # Referências no DivulgaCandContas das candidaturas mais recentes: [eleição, SQ, UE].
+        # Usadas para a foto (3 primeiras) e para o link da página oficial do candidato (proposta de governo etc.).
         fotos = []
         for i in range(b - 1, a - 1, -1):
             k = indice_eleicao_foto(int(col["ano"][i]), col["uf"][i]) if col["eleicao"][i] == 0 else None
             if k is not None and col["sq"][i]:
                 fotos.append([k, col["sq"][i], col["sg_ue"][i]])
-                if len(fotos) == 3:
+                if len(fotos) == 8:
                     break
-        if fotos:
-            pessoa.append(fotos)
-            com_foto += 1
+        pessoa.append(fotos or None)
+        com_foto += bool(fotos)
+        # Redes sociais declaradas ao TSE na candidatura mais recente que as tenha (2022+)
+        rede = next((redes[(int(col["ano"][i]), col["sq"][i])] for i in range(b - 1, a - 1, -1)
+                     if (int(col["ano"][i]), col["sq"][i]) in redes), None)
+        if rede:
+            pessoa.append(rede)
+            com_redes += 1
         lote.append(pessoa)
 
         urnas_norm = {normaliza(u) for u in urnas}
@@ -836,7 +875,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
             log(f"  {pid:,} pessoas gravadas")
 
     log(f"pessoas com registro em cadastro de sanções da CGU: {com_sancao:,}")
-    log(f"pessoas com referência de foto (2004+): {com_foto:,}")
+    log(f"pessoas com referência de foto (2004+): {com_foto:,} | com redes sociais declaradas: {com_redes:,}")
     for i, balde in enumerate(buckets):
         for k, lista in balde.items():
             if isinstance(lista, list) and len(lista) > 1:
@@ -848,7 +887,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
     listas = gerar_listas(col, out)
     for c in ("nr", "urna", "nr_partido"):
         col[c] = df[c].to_numpy()
-    colinha = gerar_colinha(col, chapas, tab, out, raw)
+    colinha = gerar_colinha(col, chapas, tab, out, raw, redes)
     anos = sorted(int(a) for a in np.unique(col["ano"]))
     meta = {
         "gerado_em": time.strftime("%Y-%m-%d"),
@@ -866,6 +905,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
         "ipca": carregar_ipca(),
         "sancoes_fontes": fontes_sancoes,  # {"CEIS": "AAAAMMDD", ...}
         "fotos_eleicoes": [e for _, _, e in ELEICOES_FOTO],  # índice usado nas referências de foto
+        "fotos_anos": [a for a, _, _ in ELEICOES_FOTO],  # ano de cada eleição acima (link da página no TSE)
         "listas": listas,  # {"2024": ["AC", "AL", ...]} — arquivos data/lista/AAAA_UF.json
         "colinha": colinha,  # {"ano": 2026, "data_tse": "dd/mm/aaaa", "ufs": [...]} ou None
         "espectro": {

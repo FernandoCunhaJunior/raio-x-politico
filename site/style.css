@@ -170,6 +170,22 @@ a { color: var(--link); }
 .cont-vaga.filtrado { color: var(--vermelho); font-weight: 700; }
 .tag-esp { display: inline-block; font-size: .7rem; padding: 0 6px; border-radius: 999px; border: 1px solid var(--c); color: var(--muted); margin-left: 2px; }
 
+/* Redes sociais e links para a página oficial no TSE */
+.redes { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.rede { display: inline-grid; place-items: center; min-width: 24px; height: 22px; padding: 0 5px; border-radius: 6px; font-size: .68rem; font-weight: 800;
+  text-decoration: none; color: #fff; background: #6b6b70; line-height: 1; }
+.rede:hover { filter: brightness(1.15); }
+.rede-IG { background: linear-gradient(45deg, #f09433, #dc2743, #bc1888); } .rede-FB { background: #1877f2; } .rede-X { background: #111; }
+.rede-YT { background: #e00; } .rede-TT { background: #111; } .rede-in { background: #0a66c2; } .rede-TG { background: #229ed9; }
+.rede-WA { background: #25d366; } .rede-KW { background: #ff7a00; } .rede-SP { background: #1db954; } .rede-web { background: var(--grafite-2); }
+.links-topo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: .88rem; }
+.link-tse-topo, .link-tse, .cand-tse { color: var(--link); font-weight: 600; text-decoration: none; }
+.link-tse-topo:hover, .link-tse:hover, .cand-tse:hover { text-decoration: underline; }
+.link-tse { font-size: .78rem; }
+.cand-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; }
+.cand-tse { font-size: .75rem; }
+.cand-links .rede { min-width: 20px; height: 18px; font-size: .6rem; }
+
 /* Colinha — folha para impressão */
 /* Cartão de bolso: 90 mm de largura, altura conforme o conteúdo (~10 cm); mesmo tamanho na tela e na impressão */
 .colinha-recorte { width: 90mm; margin: 14px auto 2px; font-size: 8pt; color: #777; }
