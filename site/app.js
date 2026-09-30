@@ -540,7 +540,10 @@ function barraEspectro() {
   </div>`;
 }
 
-// Aplica busca por texto (por vaga) + filtro de espectro (global) às listas da colinha
+// Filtro por partido nos cargos de deputado: { idDaVaga: { nr, sigla } }. Sem candidato escolhido, vale o voto na legenda.
+let partidoFiltro = {};
+
+// Aplica busca por texto (por vaga) + partido (por vaga) + espectro (global) às listas da colinha
 function aplicarFiltrosColinha() {
   document.querySelectorAll(".chip-esp").forEach((b) => b.setAttribute("aria-pressed", filtroEspectro.has(b.dataset.grupo)));
   let totalVis = 0, totalGeral = 0;
@@ -549,11 +552,14 @@ function aplicarFiltrosColinha() {
     const txt = inp?.value.trim() || "";
     const q = normaliza(txt), dig = txt.replace(/\D/g, "");
     let visiveis = 0;
+    const pf = partidoFiltro[sec.id.replace("vaga-", "")];
     sec.querySelectorAll(".cand").forEach((li) => {
       const t = li.dataset.busca;
+      const sel = li.classList.contains("sel");
       const okTxt = !txt || (q && t.includes(q)) || (dig && t.split(" ").some((x) => x.startsWith(dig)));
-      const okEsp = filtroEspectro.has(li.dataset.grupo) || li.classList.contains("sel");
-      li.hidden = !(okTxt && okEsp);
+      const okEsp = filtroEspectro.has(li.dataset.grupo) || sel;
+      const okPart = !pf || li.dataset.partido === pf.nr || sel;
+      li.hidden = !(okTxt && okEsp && okPart);
       li.style.display = li.hidden ? "none" : ""; // não depende do CSS (cache antigo de style.css)
       if (!li.hidden) visiveis++;
     });
@@ -640,7 +646,7 @@ function secaoVaga(v, dados, escolhas) {
     const grave = alerta && !/^DEFERIDO/.test(normaliza(alerta));
     const sel = esc0?.tipo === "cand" && esc0.nr === nr;
     const grupo = grupoEspectro(sigla, dados.ano);
-    return `<li class="cand${sel ? " sel" : ""}" data-vaga="${v.id}" data-k="${k}" data-grupo="${esc(grupo)}" data-busca="${esc(normaliza(nome) + " " + nr + " " + normaliza(sigla))}" tabindex="0" role="button" aria-pressed="${sel}">
+    return `<li class="cand${sel ? " sel" : ""}" data-vaga="${v.id}" data-k="${k}" data-grupo="${esc(grupo)}" data-partido="${esc(c[3])}" data-busca="${esc(normaliza(nome) + " " + nr + " " + normaliza(sigla))}" tabindex="0" role="button" aria-pressed="${sel}">
       <img loading="lazy" referrerpolicy="no-referrer" alt="" src="${FOTO_BASE}/${META.fotos_eleicoes[META.fotos_eleicoes.length - 1]}/${esc(sq)}/${esc(ue)}">
       <span class="cand-info"><strong>${esc(nome)}</strong><small>${esc(sigla)} <span class="tag-esp esp-${GRUPOS_ESPECTRO.indexOf(grupo)}">${esc(grupo)}</span>${comp ? ` · ${esc(comp)}` : ""}</small>
         ${alerta ? `<em class="${grave ? "grave" : "leve"}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>` : ""}</span>
@@ -648,9 +654,9 @@ function secaoVaga(v, dados, escolhas) {
       <a class="cand-ficha" href="#${new URLSearchParams({ q: nome, p: pid })}" title="Ver ficha">ficha</a>
     </li>`;
   }).join("");
-  const legenda = v.legenda ? `<label class="legenda-sel">ou votar só no partido (legenda):
-      <select data-legenda="${v.id}"><option value="">—</option>${(dados.partidos || []).map(([n, s]) =>
-        `<option value="${esc(n)}|${esc(s)}" data-grupo="${esc(grupoEspectro(s, dados.ano))}" ${esc0?.tipo === "legenda" && esc0.nr === n ? "selected" : ""}>${esc(n)} · ${esc(s)}</option>`).join("")}</select></label>` : "";
+  const legenda = v.legenda ? `<label class="legenda-sel" title="Mostra só os candidatos do partido. Se você não escolher um candidato, a colinha registra o voto na legenda (número do partido).">Partido:
+      <select data-legenda="${v.id}"><option value="">todos</option>${(dados.partidos || []).map(([n, s]) =>
+        `<option value="${esc(n)}|${esc(s)}" data-grupo="${esc(grupoEspectro(s, dados.ano))}">${esc(n)} · ${esc(s)}</option>`).join("")}</select></label>` : "";
   return `<section class="bloco vaga" id="vaga-${v.id}">
     <div class="vaga-topo"><h3>${esc(v.rot)} <small>${v.dig} dígitos · <span class="cont-vaga" data-total="${lista.length}">${lista.length} candidatos</span></small></h3>
       <span class="vaga-escolha" id="escolha-${v.id}"></span></div>
@@ -670,6 +676,18 @@ function textoEscolha(e) {
 
 function ligarColinha(uf, vagas, dados) {
   const escolhas = lerEscolhas(uf);
+  // Filtro de partido salvo junto das escolhas (chave "_p_<vaga>"); escolhas antigas de legenda também ativam o filtro
+  partidoFiltro = {};
+  for (const v of vagas) {
+    if (!v.legenda) continue;
+    const pf = escolhas[`_p_${v.id}`] || (escolhas[v.id]?.tipo === "legenda" ? { nr: escolhas[v.id].nr, sigla: escolhas[v.id].sigla } : null);
+    if (pf) partidoFiltro[v.id] = pf;
+  }
+  const definirPartido = (id, pf) => {
+    if (pf) { partidoFiltro[id] = pf; escolhas[`_p_${id}`] = pf; }
+    else { delete partidoFiltro[id]; delete escolhas[`_p_${id}`]; }
+  };
+  const legendaDe = (id) => partidoFiltro[id] ? { tipo: "legenda", nr: partidoFiltro[id].nr, sigla: partidoFiltro[id].sigla } : null;
   const atualizar = () => {
     salvarEscolhas(uf, escolhas);
     let n = 0;
@@ -687,7 +705,7 @@ function ligarColinha(uf, vagas, dados) {
         li.classList.toggle("bloqueado", !!(outro?.tipo === "cand" && outro.nr === c[0]));
       }
       const sel = document.querySelector(`[data-legenda="${v.id}"]`);
-      if (sel) sel.value = e?.tipo === "legenda" ? `${e.nr}|${e.sigla}` : "";
+      if (sel) sel.value = partidoFiltro[v.id] ? `${partidoFiltro[v.id].nr}|${partidoFiltro[v.id].sigla}` : "";
     }
     $("#colinha-contador").textContent = `${n} de ${vagas.length} escolhas feitas`;
     aplicarFiltrosColinha();
@@ -697,8 +715,11 @@ function ligarColinha(uf, vagas, dados) {
     const v = vagas.find((x) => x.id === li.dataset.vaga);
     const [nr, nome, sigla] = (dados.cargos[v.cargo] || [])[+li.dataset.k];
     const atual = escolhas[v.id];
-    if (atual?.tipo === "cand" && atual.nr === nr) delete escolhas[v.id];
-    else escolhas[v.id] = { tipo: "cand", nr, nome, sigla };
+    if (atual?.tipo === "cand" && atual.nr === nr) {
+      // Desmarcou o candidato: se há partido escolhido, volta a valer o voto na legenda
+      const leg = legendaDe(v.id);
+      if (leg) escolhas[v.id] = leg; else delete escolhas[v.id];
+    } else escolhas[v.id] = { tipo: "cand", nr, nome, sigla };
     atualizar();
   };
   const raiz = $("#explorar");
@@ -716,7 +737,7 @@ function ligarColinha(uf, vagas, dados) {
     const li = ev.target.closest(".cand");
     if (li) return escolher(li);
     const b = ev.target.closest("[data-branco]");
-    if (b) { escolhas[b.dataset.branco] = { tipo: "branco" }; atualizar(); }
+    if (b) { definirPartido(b.dataset.branco, null); escolhas[b.dataset.branco] = { tipo: "branco" }; atualizar(); }
   };
   raiz.onkeydown = (ev) => {
     const li = ev.target.closest?.(".cand");
@@ -725,8 +746,17 @@ function ligarColinha(uf, vagas, dados) {
   raiz.onchange = (ev) => {
     const s = ev.target.closest("[data-legenda]");
     if (!s) return;
-    if (s.value) { const [nr, sigla] = s.value.split("|"); escolhas[s.dataset.legenda] = { tipo: "legenda", nr, sigla }; }
-    else delete escolhas[s.dataset.legenda];
+    const id = s.dataset.legenda;
+    const atual = escolhas[id];
+    if (s.value) {
+      const [nr, sigla] = s.value.split("|");
+      definirPartido(id, { nr, sigla });
+      // Mantém o candidato escolhido se for do mesmo partido; senão, vale o voto na legenda
+      if (!(atual?.tipo === "cand" && atual.sigla === sigla)) escolhas[id] = legendaDe(id);
+    } else {
+      definirPartido(id, null);
+      if (atual?.tipo === "legenda") delete escolhas[id];
+    }
     atualizar();
   };
   raiz.oninput = (ev) => { if (ev.target.closest("[data-busca-vaga]")) aplicarFiltrosColinha(); };
