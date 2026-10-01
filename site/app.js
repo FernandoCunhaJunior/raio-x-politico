@@ -568,6 +568,7 @@ function barraEspectro() {
       ${GRUPOS_ESPECTRO.map((g, i) => `<button type="button" class="chip-esp esp-${i}" data-grupo="${esc(g)}" aria-pressed="${filtroEspectro.has(g)}">${esc(g)}</button>`).join("")}
       <button type="button" class="chip-esp-todos" data-grupo="*">Todos</button>
     </div>
+    <div id="grafico-espectro" class="grafico-espectro"></div>
     <p class="resumo-filtro" id="resumo-filtro" aria-live="polite"></p>
     <p class="nota">Marque um ou mais grupos. A classificação é do <strong>partido</strong> (não da pessoa), segundo
       <a href="#partidos=1">Bolognesi, Ribeiro e Codato (2023)</a>; “Esquerda” inclui a extrema-esquerda e “Direita” inclui a
@@ -579,8 +580,40 @@ function barraEspectro() {
 let partidoFiltro = {};
 
 // Aplica busca por texto (por vaga) + partido (por vaga) + espectro (global) às listas da colinha
+// Barra 100% (SVG) com a distribuição dos candidatos do estado por espectro do partido.
+// Conta cada candidato uma vez (senadores aparecem em duas listas). Clicar num segmento = clicar no botão do grupo.
+function desenharGraficoEspectro() {
+  const alvo = $("#grafico-espectro");
+  if (!alvo) return;
+  const cont = new Map(GRUPOS_ESPECTRO.map((g) => [g, 0]));
+  document.querySelectorAll(".vaga:not(#vaga-S2) .cand").forEach((li) => cont.set(li.dataset.grupo, (cont.get(li.dataset.grupo) || 0) + 1));
+  const total = [...cont.values()].reduce((a, b) => a + b, 0);
+  if (!total) { alvo.innerHTML = ""; return; }
+  const W = 1000, H = 46;
+  let x = 0;
+  const rotulos = [];
+  const segs = GRUPOS_ESPECTRO.map((g, i) => {
+    const n = cont.get(g), w = (n / total) * W;
+    const pct = (n / total) * 100;
+    // Percentual em HTML por cima da barra (texto dentro do SVG esticado ficaria deformado no celular)
+    if (pct >= 7) rotulos.push(`<span class="esp-${i}" data-grupo="${esc(g)}" style="left:${x / 10}%;width:${w / 10}%">${Math.round(pct)}%</span>`);
+    const s = n ? `<g class="seg esp-${i}" data-grupo="${esc(g)}" role="button" tabindex="0" aria-label="${esc(g)}: ${n} candidatos (${fmtPct(pct)})">
+        <rect x="${x}" y="0" width="${w}" height="${H}" style="fill:var(--c)"><title>${esc(g)}: ${n.toLocaleString("pt-BR")} candidatos (${fmtPct(pct)})</title></rect></g>` : "";
+    x += w;
+    return s;
+  }).join("");
+  alvo.innerHTML = `<div class="barra-esp"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Distribuição dos candidatos por espectro do partido">${segs}</svg>
+    <div class="rotulos-esp" aria-hidden="true">${rotulos.join("")}</div></div>
+    <div class="legenda-esp">${GRUPOS_ESPECTRO.map((g, i) => {
+      const n = cont.get(g);
+      return `<span class="esp-${i}" data-grupo="${esc(g)}"><i></i>${esc(g)} <b>${fmtPct((n / total) * 100)}</b> <small>(${n.toLocaleString("pt-BR")})</small></span>`;
+    }).join("")}</div>
+    <p class="nota" style="margin-top:4px">Distribuição dos ${total.toLocaleString("pt-BR")} candidatos na urna deste estado (todos os cargos, cada pessoa contada uma vez).</p>`;
+}
+
 function aplicarFiltrosColinha() {
   document.querySelectorAll(".chip-esp").forEach((b) => b.setAttribute("aria-pressed", filtroEspectro.has(b.dataset.grupo)));
+  document.querySelectorAll("#grafico-espectro [data-grupo]").forEach((s) => s.classList.toggle("apagado", !filtroEspectro.has(s.dataset.grupo)));
   let totalVis = 0, totalGeral = 0;
   document.querySelectorAll(".vaga").forEach((sec) => {
     const inp = sec.querySelector("[data-busca-vaga]");
@@ -651,6 +684,8 @@ async function mostrarColinha(uf, imprimir) {
       <div id="explorar-corpo"></div></div>`;
     $("#explorar-corpo").innerHTML = await etapaMapa((u) => `colinha=1&uf=${u}`, `<p class="nota">O voto para Presidente é o mesmo em todo o país e aparece junto com os cargos do seu estado.</p>`);
     rotularMapa();
+    // Leva a pessoa até o mapa (senão parece que o clique em "Monte sua colinha" não fez nada)
+    el.scrollIntoView({ behavior: semAnimacao ? "auto" : "smooth", block: "start" });
     return;
   }
   el.innerHTML = `<div class="bloco"><div class="status"><span class="spinner"></span> Carregando candidatos…</div></div>`;
@@ -763,7 +798,7 @@ function ligarColinha(uf, vagas, dados) {
   const raiz = $("#explorar");
   raiz.onclick = (ev) => {
     if (ev.target.closest(".cand-ficha, .cand-tse, .redes a")) return; // links (ficha, TSE, redes) seguem normalmente
-    const chip = ev.target.closest("[data-grupo]:is(.chip-esp, .chip-esp-todos)");
+    const chip = ev.target.closest("[data-grupo]:is(.chip-esp, .chip-esp-todos, .seg, .legenda-esp span)");
     if (chip) {
       const g = chip.dataset.grupo;
       if (g === "*") filtroEspectro = new Set(GRUPOS_ESPECTRO);
@@ -778,8 +813,11 @@ function ligarColinha(uf, vagas, dados) {
     if (b) { definirPartido(b.dataset.branco, null); escolhas[b.dataset.branco] = { tipo: "branco" }; atualizar(); }
   };
   raiz.onkeydown = (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const seg = ev.target.closest?.(".seg");
+    if (seg) { ev.preventDefault(); seg.dispatchEvent(new MouseEvent("click", { bubbles: true })); return; }
     const li = ev.target.closest?.(".cand");
-    if (li && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); escolher(li); }
+    if (li) { ev.preventDefault(); escolher(li); }
   };
   raiz.onchange = (ev) => {
     const s = ev.target.closest("[data-legenda]");
@@ -798,6 +836,7 @@ function ligarColinha(uf, vagas, dados) {
     atualizar();
   };
   raiz.oninput = (ev) => { if (ev.target.closest("[data-busca-vaga]")) aplicarFiltrosColinha(); };
+  desenharGraficoEspectro();
   atualizar();
   aplicarFiltrosColinha();
 }
