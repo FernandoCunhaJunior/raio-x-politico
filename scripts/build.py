@@ -299,6 +299,81 @@ def carregar_redes(raw):
     return redes
 
 
+# Resultados oficiais (portal resultados.tse.jus.br), usados enquanto o TSE não publica a totalização nos
+# dados abertos. Códigos das eleições no portal: federal (presidente) e estadual (governador, senador, deputados).
+RESULTADOS_PORTAL = {
+    2026: {"ciclo": "ele2026", "federal": "6257", "estadual": "6259", "data_turno2": "25/10/2026",
+           "data_turno1": "04/10/2026"},
+}
+DATA_RESULTADOS = {}  # ano -> data (dd/mm/aaaa) dos resultados lidos do portal
+UFS_BR = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR",
+          "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
+
+
+def _ler_jws(conteudo):
+    """O portal publica JSON assinado (JWS): o JSON vem em base64url no segundo segmento."""
+    import base64
+    seg = conteudo.split(b".")[1]
+    return json.loads(base64.urlsafe_b64decode(seg + b"=" * (-len(seg) % 4)).decode("utf-8"))
+
+
+def carregar_resultados(raw, ano):
+    """{SQ_CANDIDATO: (situação, votos, % válidos)} do 1º turno de `ano`, a partir do portal de resultados do TSE.
+
+    Arquivos salvos em raw/resultados/. Para presidente/governador com apuração 100% e situação em branco,
+    os dois mais votados recebem "2º TURNO" quando ninguém foi eleito.
+    """
+    cfg = RESULTADOS_PORTAL.get(ano)
+    if not cfg:
+        return {}, ""
+    destino = os.path.join(raw, "resultados")
+    os.makedirs(destino, exist_ok=True)
+    alvos = [("br", cfg["federal"], 1)]
+    for uf in UFS_BR:
+        for cargo in (3, 5, 6, 8 if uf == "DF" else 7):
+            alvos.append((uf.lower(), cfg["estadual"], cargo))
+    res, data, falhas = {}, "", 0
+    for uf, ele, cargo in alvos:
+        nome = f"{uf}-c{cargo:04d}-e{int(ele):06d}-u.jws"
+        url = f"https://resultados.tse.jus.br/oficial/{cfg['ciclo']}/{ele}/dados/{uf}/{nome}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Lente Publica)"})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                conteudo = r.read()
+            with open(os.path.join(destino, nome), "wb") as f:
+                f.write(conteudo)
+            j = _ler_jws(conteudo)
+        except Exception as e:  # noqa: BLE001
+            falhas += 1
+            log(f"resultados: falha em {nome}: {e}")
+            continue
+        data = max(data, f"{j.get('dg', '')} {j.get('hg', '')}") if j.get("dg") else data
+        cands = []
+
+        def walk(o):
+            if isinstance(o, dict):
+                if "sqcand" in o and "vap" in o:
+                    cands.append(o)
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v)
+        walk(j)
+        apurado = (j.get("s") or {}).get("pst", "")
+        if cargo in (1, 3) and apurado == "100,00" and not any(c.get("st") for c in cands) \
+                and not any(c.get("e") == "s" for c in cands):
+            for k, c in enumerate(sorted(cands, key=lambda c: -int(c.get("vap") or 0))):
+                c["st"] = "2º turno" if k < 2 else "Não eleito"
+        for c in cands:
+            res[str(c["sqcand"])] = ((c.get("st") or "").strip(), int(c.get("vap") or 0),
+                                     float((c.get("pvap") or "0").replace(",", ".")))
+    log(f"resultados {ano}: {len(res):,} candidatos em {len(alvos) - falhas}/{len(alvos)} arquivos (gerados até {data})")
+    if data:
+        DATA_RESULTADOS[ano] = data.split(" ")[0]
+    return res, data
+
+
 def carregar_correcoes():
     caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "correcoes.csv")
     return pd.read_csv(caminho, sep=";", dtype=str, comment="#", keep_default_na=False)
@@ -347,6 +422,18 @@ def carregar_candidaturas(raw, anos, bens, tab, receitas):
         df = (df.sort_values("_turno", kind="stable")
                 .drop_duplicates(["SG_UE", "DS_CARGO", "SQ_CANDIDATO"], keep="last")
                 .reset_index(drop=True))
+        # Resultado do portal de resultados (quando o arquivo de candidatos ainda não traz a totalização)
+        votos = np.full(len(df), np.nan)
+        pct = np.full(len(df), np.nan)
+        if ano in RESULTADOS_PORTAL and (df["DS_SIT_TOT_TURNO"] == "").all():
+            mapa_res, _ = carregar_resultados(raw, ano)
+            if mapa_res:
+                achado = df["SQ_CANDIDATO"].map(mapa_res)
+                tem = achado.notna()
+                df.loc[tem, "DS_SIT_TOT_TURNO"] = achado[tem].map(lambda x: x[0].upper())
+                votos = achado.map(lambda x: x[1] if isinstance(x, tuple) else np.nan).to_numpy(dtype=float)
+                pct = achado.map(lambda x: x[2] if isinstance(x, tuple) else np.nan).to_numpy(dtype=float)
+                log(f"resultados {ano}: aplicados a {int(tem.sum()):,} candidaturas")
         herdados = completar_resultados(df, ano, correcoes)
         suplementar = df["NM_TIPO_ELEICAO"].str.upper().str.contains("SUPLEMENTAR")
         eleicao = df["DS_ELEICAO"].where(suplementar, "")
@@ -368,6 +455,7 @@ def carregar_candidaturas(raw, anos, bens, tab, receitas):
                                                          df["DS_COMPOSICAO_FEDERACAO"])
         composicao = composicao.where(com_colig & composicao.str.contains("/", regex=False), "")
         extras = {f"b{i}": por_cat[i] for i in range(n_cat)}
+        extras.update(votos=votos, pct_validos=pct)
         # Receitas de campanha (2018+): NaN = sem prestação de contas/receitas no arquivo do TSE
         if ano in receitas:
             r = receitas[ano].reindex(df["SG_UE"] + "|" + df["SQ_CANDIDATO"])
@@ -720,14 +808,25 @@ def gerar_colinha(col, chapas, tab, out, raw, redes=None):
     situacao = dict(zip(comp["SQ_CANDIDATO"], zip(comp["ST_CANDIDATO_INSERIDO_URNA"], comp["DS_SITUACAO_JULGAMENTO"])))
     data_tse = comp["DT_GERACAO"].max() if len(comp) else ""
     cargo_norm = [normaliza(c) for c in tab["cargo"].itens]
+    res_norm = [normaliza(r) for r in tab["resultado"].itens]
     siglas = [p.split("|")[0] for p in tab["partido"].itens]
+    linhas = np.flatnonzero(col["ano"] == ano)
+    # Depois do 1º turno: a colinha passa a mostrar só quem disputa o 2º turno (presidente/governador)
+    turno2 = any(cargo_norm[col["cargo"][i]] in ("PRESIDENTE", "GOVERNADOR") and "TURNO" in res_norm[col["resultado"][i]]
+                 for i in linhas)
+    cfg = RESULTADOS_PORTAL.get(ano, {})
     por_uf, na_urna, fora = {}, 0, 0
-    for i in np.flatnonzero(col["ano"] == ano):
+    for i in linhas:
         cargo = cargo_norm[col["cargo"][i]]
         if cargo not in CARGOS_COLINHA:
             continue
         ins, julg = situacao.get(col["sq"][i], ("", ""))
-        if normaliza(ins) != "SIM":
+        if turno2:
+            if cargo not in ("PRESIDENTE", "GOVERNADOR") or "TURNO" not in res_norm[col["resultado"][i]]:
+                fora += 1
+                continue
+            julg = ""
+        elif normaliza(ins) != "SIM":
             fora += 1
             continue
         na_urna += 1
@@ -737,18 +836,29 @@ def gerar_colinha(col, chapas, tab, out, raw, redes=None):
         por_uf.setdefault(uf, {}).setdefault(cargo, []).append([
             col["nr"][i], col["urna"][i] or col["nome"][i], siglas[col["partido"][i]], col["nr_partido"][i],
             int(col["pid"][i]), col["sq"][i], col["sg_ue"][i], alerta, comp_txt,
-            (redes or {}).get((ano, col["sq"][i]), [])])
-    os.makedirs(os.path.join(out, "colinha"), exist_ok=True)
+            (redes or {}).get((ano, col["sq"][i]), []),
+            None if np.isnan(col["votos"][i]) else [int(col["votos"][i]), round(float(col["pct_validos"][i]), 2)]])
+    os.makedirs(os.path.join(out, "colinha", ), exist_ok=True)
+    if turno2:  # estados sem 2º turno para governador ainda votam para presidente: arquivo (vazio) para todos
+        for uf in UFS_BR:
+            por_uf.setdefault(uf, {})
+        for lista in (c for cs in por_uf.values() for c in cs.values()):
+            lista.sort(key=lambda x: -(x[10][0] if x[10] else 0))  # no 2º turno, ordem de votação do 1º turno
     for uf, cargos in por_uf.items():
         for lista in cargos.values():
-            lista.sort(key=lambda x: normaliza(x[1]))
+            if not turno2:
+                lista.sort(key=lambda x: normaliza(x[1]))
         partidos = sorted({(c[3], c[2]) for k, l in cargos.items() if k.startswith("DEPUTADO") for c in l if c[3]},
                           key=lambda x: int(x[0]) if x[0].isdigit() else 999)
         with open(os.path.join(out, "colinha", f"{ano}_{uf}.json"), "w", encoding="utf-8") as f:
             json.dump({"ano": ano, "data_tse": data_tse, "cargos": cargos, "partidos": partidos}, f,
                       ensure_ascii=False, separators=(",", ":"))
-    log(f"colinha {ano}: {na_urna:,} candidatos na urna em {len(por_uf)} UFs ({fora:,} fora da urna excluídos)")
-    return {"ano": ano, "data_tse": data_tse, "ufs": sorted(por_uf)}
+    turno = 2 if turno2 else 1
+    if turno2:
+        data_tse = DATA_RESULTADOS.get(ano, data_tse)
+    log(f"colinha {ano} ({turno}º turno): {na_urna:,} candidatos em {len(por_uf)} UFs ({fora:,} excluídos)")
+    return {"ano": ano, "turno": turno, "data_eleicao": cfg.get(f"data_turno{turno}", ""), "data_tse": data_tse,
+            "ufs": sorted(por_uf)}
 
 
 def cap_py(s):
@@ -778,7 +888,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
            ["pid", "ano", "eleicao", "cargo", "ue", "partido", "situacao", "resultado",
             "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask",
             "genero", "instrucao", "cor", "uf_nasc", "coligacao", "sanc", "sq", "sg_ue", "uf",
-            "rec_total", "rec_fefc", "rec_fp",
+            "rec_total", "rec_fefc", "rec_fp", "votos", "pct_validos",
             *[f"b{i}" for i in range(n_cat)]]}
     com_sancao = com_foto = com_redes = 0
     redes = carregar_redes(raw)
@@ -812,9 +922,12 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
             tem_bens = not np.isnan(v) and v > 0
             # Posições (site/app.js): 0 ano, 1 cargo, 2 local, 3 partido, 4 situação, 5 resultado,
             # 6 bens (total), 7 eleição suplementar, 8 chapa, 9 bens por categoria, 10 ocupação, 11 coligação,
-            # 12 receitas de campanha [total, fundo eleitoral (FEFC), fundo partidário].
+            # 12 receitas de campanha [total, fundo eleitoral (FEFC), fundo partidário],
+            # 13 votos no 1º turno [votos, % dos válidos] (portal de resultados; hoje só a eleição mais recente).
             rt = col["rec_total"][i]
             receita = None if np.isnan(rt) else [int(round(rt)), int(round(col["rec_fefc"][i])), int(round(col["rec_fp"][i]))]
+            vt = col["votos"][i]
+            votos = None if np.isnan(vt) else [int(vt), round(float(col["pct_validos"][i]), 2)]
             cand = [
                 int(col["ano"][i]), int(col["cargo"][i]), int(col["ue"][i]), int(col["partido"][i]),
                 int(col["situacao"][i]), int(col["resultado"][i]),
@@ -824,6 +937,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
                 int(col["ocupacao"][i]),
                 col["coligacao"][i],
                 receita,
+                votos,
             ]
             while len(cand) > 8 and cand[-1] in (None, "", 0):  # corta campos finais vazios
                 cand.pop()

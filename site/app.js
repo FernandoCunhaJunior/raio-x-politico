@@ -181,7 +181,7 @@ const NOMES_CADASTRO = {
 };
 
 // Posições definidas em scripts/build.py (gerar)
-function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao, receita]) {
+function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao, receita, votos]) {
   const T = META.tabelas;
   const [uf, local] = T.ue[ue].split("|");
   const [sigla, nomePartido] = T.partido[partido].split("|");
@@ -197,6 +197,7 @@ function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleica
     coligacao: coligacao || "",
     // Receitas de campanha (2018+): total, fundo eleitoral (FEFC), fundo partidário
     receita: receita ? { total: receita[0], fefc: receita[1], fp: receita[2], publico: receita[1] + receita[2] } : null,
+    votos: votos ? { n: votos[0], pct: votos[1] } : null, // votos no 1º turno (portal de resultados do TSE)
   };
 }
 
@@ -549,7 +550,10 @@ const VAGAS_COLINHA = [
   { id: "GV", cargo: "GOVERNADOR", rot: "Governador(a)", curto: "Governador", dig: 2 },
   { id: "PR", cargo: "PRESIDENTE", rot: "Presidente da República", curto: "Presidente", dig: 2 },
 ];
-const DATA_ELEICAO = "4 de outubro de 2026 (1º turno)";
+// Data e turno da colinha vêm do processamento (META.colinha): 1º turno antes da eleição, 2º turno depois.
+const turnoColinha = () => META.colinha?.turno || 1;
+const dataColinha = () => META.colinha?.data_eleicao || "";
+const dataEleicaoTexto = () => `${dataColinha()} (${turnoColinha()}º turno)`;
 
 // Filtro da colinha por espectro da legenda: as 7 faixas do estudo agrupadas em 5 (+ "sem classificação").
 const GRUPOS_ESPECTRO = ["Esquerda", "Centro-esquerda", "Centro", "Centro-direita", "Direita", "Sem classificação"];
@@ -655,7 +659,8 @@ function aplicarFiltrosColinha() {
   }
 }
 
-const chaveColinha = (uf) => `colinha_${META.colinha?.ano}_${uf}`;
+// Escolhas separadas por turno (as do 1º turno não aparecem na colinha do 2º)
+const chaveColinha = (uf) => `colinha_${META.colinha?.ano}${turnoColinha() === 2 ? "_t2" : ""}_${uf}`;
 function lerEscolhas(uf) { try { return JSON.parse(localStorage.getItem(chaveColinha(uf)) || "{}"); } catch { return {}; } }
 function salvarEscolhas(uf, e) { try { localStorage.setItem(chaveColinha(uf), JSON.stringify(e)); } catch { /* navegação privada */ } }
 
@@ -679,8 +684,10 @@ async function mostrarColinha(uf, imprimir) {
 
   if (!uf) {
     el.innerHTML = `<div class="bloco explorar colinha-intro">${topo("Etapa 1 de 3 · Escolha o seu estado")}
-      <p>Monte a sua <strong>colinha</strong> para o dia da eleição (${DATA_ELEICAO}): escolha seus candidatos e imprima uma
+      <p>Monte a sua <strong>colinha</strong> para o dia da eleição (${esc(dataEleicaoTexto())}): escolha seus candidatos e imprima uma
         folha com os números, na ordem em que você vai votar na urna. Suas escolhas ficam só neste navegador.</p>
+      ${turnoColinha() === 2 ? `<p class="aviso-turno"><strong>2º turno:</strong> você vota para <strong>Presidente</strong> e, nos estados onde
+        ninguém foi eleito no 1º turno, também para <strong>Governador</strong>. Só aparecem os dois candidatos mais votados de cada disputa.</p>` : ""}
       <div id="explorar-corpo"></div></div>`;
     $("#explorar-corpo").innerHTML = await etapaMapa((u) => `colinha=1&uf=${u}`, `<p class="nota">O voto para Presidente é o mesmo em todo o país e aparece junto com os cargos do seu estado.</p>`);
     rotularMapa();
@@ -697,9 +704,13 @@ async function mostrarColinha(uf, imprimir) {
   const escolhas = lerEscolhas(uf);
   if (imprimir) return renderImpressao(el, topo, uf, vagas, escolhas, dados);
 
+  const t2 = turnoColinha() === 2;
+  const semGov = t2 && !vagas.some((v) => v.cargo === "GOVERNADOR");
   el.innerHTML = `<div class="bloco explorar">${topo("Etapa 2 de 3 · Escolha seus candidatos")}
-    <p class="muted">Candidatos que estão na urna, em ordem alfabética. Toque em um nome para escolher; toque de novo para desfazer.
-      Dados do TSE de ${esc(dados.data_tse || "—")}.</p></div>
+    <p class="muted">${t2 ? `Candidatos do <b>2º turno (${esc(dataColinha())})</b>, na ordem de votação do 1º turno.`
+      : "Candidatos que estão na urna, em ordem alfabética."} Toque em um nome para escolher; toque de novo para desfazer.
+      ${t2 ? "Resultado do 1º turno" : "Dados do TSE"} de ${esc(dados.data_tse || "—")}.</p>
+    ${semGov ? `<p class="aviso-turno">Em ${esc(NOMES_UF[uf])}, o governador foi eleito no 1º turno — no dia ${esc(dataColinha())} você vota só para Presidente.</p>` : ""}</div>
     ${barraEspectro()}
     ${vagas.map((v) => secaoVaga(v, dados, escolhas)).join("")}
     <div class="barra-colinha"><span id="colinha-contador"></span>
@@ -712,7 +723,7 @@ function secaoVaga(v, dados, escolhas) {
   const lista = dados.cargos[v.cargo] || [];
   const esc0 = escolhas[v.id];
   const linhas = lista.map((c, k) => {
-    const [nr, nome, sigla, , pid, sq, ue, alerta, comp, redes] = c;
+    const [nr, nome, sigla, , pid, sq, ue, alerta, comp, redes, votos1t] = c;
     const grave = alerta && !/^DEFERIDO/.test(normaliza(alerta));
     const sel = esc0?.tipo === "cand" && esc0.nr === nr;
     const grupo = grupoEspectro(sigla, dados.ano);
@@ -721,6 +732,7 @@ function secaoVaga(v, dados, escolhas) {
       <img loading="lazy" referrerpolicy="no-referrer" alt="" src="${FOTO_BASE}/${META.fotos_eleicoes[META.fotos_eleicoes.length - 1]}/${esc(sq)}/${esc(ue)}">
       <span class="cand-info"><strong>${esc(nome)}</strong><small>${esc(sigla)} <span class="tag-esp esp-${GRUPOS_ESPECTRO.indexOf(grupo)}">${esc(grupo)}</span>${comp ? ` · ${esc(comp)}` : ""}</small>
         ${alerta ? `<em class="${grave ? "grave" : "leve"}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>` : ""}
+        ${votos1t ? `<em class="leve">1º turno: ${votos1t[1].toLocaleString("pt-BR", { minimumFractionDigits: 2 })}% dos válidos (${votos1t[0].toLocaleString("pt-BR")} votos)</em>` : ""}
         <span class="cand-links">${iconesRedes(redes, 8)}<a class="cand-tse" href="${esc(tse)}" target="_blank" rel="noopener"
           title="Página oficial do candidato no TSE">${temProposta(v.cargo) ? "📄 proposta de governo" : "página no TSE"} ↗</a></span></span>
       <span class="cand-num">${esc(nr)}</span>
@@ -858,7 +870,7 @@ function renderImpressao(el, topo, uf, vagas, escolhas, dados) {
         <a class="botao-sec" href="#colinha=1&uf=${uf}">← Alterar escolhas</a></div></div>
     <div class="colinha-recorte">✂ recorte na linha tracejada</div>
     <div id="colinha-imprimir" class="colinha-folha">
-      <div class="colinha-cab"><strong>MINHA COLINHA</strong><span>${esc(uf)} · 4/10/2026 · 1º turno</span></div>
+      <div class="colinha-cab"><strong>MINHA COLINHA</strong><span>${esc(uf)} · ${esc(dataColinha())} · ${turnoColinha()}º turno</span></div>
       <p class="colinha-ordem">Digite o número e aperte <b>CONFIRMA</b>, nesta ordem:</p>
       <div class="cl-lista">${linhas}</div>
       <div class="colinha-rodape">Celular não entra na cabine · leve documento com foto · dados TSE ${esc(dd && mm ? `${dd}/${mm}` : "—")} · lentepublica.com.br</div>
@@ -1337,7 +1349,9 @@ function linhaCand(c) {
   const problema = temProblema(c);
   const sit = c.situacao && !/^(APTO|DEFERIDO)/.test(c.situacao)
     ? `<div>${problema ? `<span class="selo alerta" style="margin:4px 0 0">${esc(cap(c.situacao))}</span>` : `<span class="muted">${esc(cap(c.situacao))}</span>`}</div>` : "";
-  const res = c.resultado ? (c.eleito ? `<span class="selo ok" style="margin:0">${esc(cap(c.resultado))}</span>` : esc(cap(c.resultado))) : `<span class="muted">—</span>`;
+  const turno2 = /TURNO/.test(normaliza(c.resultado || ""));
+  const res = (c.resultado ? (c.eleito || turno2 ? `<span class="selo ${c.eleito ? "ok" : "turno"}" style="margin:0">${esc(cap(c.resultado))}</span>` : esc(cap(c.resultado))) : `<span class="muted">—</span>`)
+    + (c.votos ? `<div class="muted votos-cel">${c.votos.n.toLocaleString("pt-BR")} votos · ${c.votos.pct.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}%</div>` : "");
   const bens = c.bens === null ? `<span class="muted">n/d</span>` : brl.format(c.bens);
   const colig = c.coligacao ? `<div class="colig" title="Coligação/federação">${esc(c.coligacao)}</div>` : "";
   return `<tr class="${c.eleito ? "eleito" : ""}${problema ? " problema" : ""}">
@@ -1467,6 +1481,12 @@ async function iniciar() {
     $("#n-anos").textContent = `${META.anos.length} (${META.anos[0]}–${META.anos[META.anos.length - 1]})`;
     const versaoSite = (document.querySelector('script[src*="app.js"]')?.src.match(/v=([a-f0-9]+)/) || [])[1] || "local";
     $("#meta-info").textContent = `Base atualizada em ${META.gerado_em.split("-").reverse().join("/")} · versão ${versaoSite}.`;
+    const subColinha = document.querySelector(".botao-colinha small");
+    if (subColinha && META.colinha?.data_eleicao) {
+      subColinha.textContent = turnoColinha() === 2
+        ? `2º turno em ${META.colinha.data_eleicao}: escolha seus candidatos e imprima os números`
+        : `Escolha seus candidatos e imprima os números para ${META.colinha.data_eleicao}`;
+    }
   } catch (e) {
     return setStatus("Os dados ainda não foram gerados. Rode o workflow de build no GitHub Actions.", { erro: true });
   }
