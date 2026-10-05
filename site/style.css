@@ -257,6 +257,8 @@ a { color: var(--link); }
 }
 .botao-mapa:hover { background: rgba(196, 22, 28, .35); border-color: rgba(255, 90, 95, .7); }
 .botao-mapa svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.botao-painel { margin-left: 8px; background: rgba(196, 22, 28, .22); border-color: rgba(255, 90, 95, .55); }
+@media (max-width: 640px) { .botao-painel { margin-left: 0; } }
 
 /* Explorar */
 .explorar-topo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 16px; }

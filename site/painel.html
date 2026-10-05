@@ -28,17 +28,22 @@
       <h1>Painel das <span>Eleições</span></h1>
       <p class="lead">Escolha o ano, o estado e o cargo para ver quem disputou, quem venceu, os partidos, o perfil dos candidatos,
         o dinheiro das campanhas, as candidaturas barradas e a participação do eleitor.</p>
+    </div>
+  </section>
+
+  <div class="painel-barra">
+    <div class="wrap">
       <form class="painel-filtros" id="filtros" aria-label="Filtros do painel">
         <label>Ano <select id="f-ano"></select></label>
         <label>Estado <select id="f-uf"></select></label>
         <label>Cargo <select id="f-cargo"></select></label>
       </form>
       <nav class="painel-nav" aria-label="Seções do painel">
-        <a href="#s-panorama">Panorama</a><a href="#s-partidos">Partidos e espectro</a><a href="#s-perfil">Perfil</a>
-        <a href="#s-dinheiro">Dinheiro</a><a href="#s-restricoes">Restrições</a><a href="#s-participacao">Participação</a>
+        <a href="#s-panorama">Panorama</a><a href="#s-mapa">Mapa</a><a href="#s-partidos">Partidos</a><a href="#s-evolucao">Evolução</a>
+        <a href="#s-perfil">Perfil</a><a href="#s-dinheiro">Dinheiro</a><a href="#s-restricoes">Barradas</a><a href="#s-participacao">Participação</a>
       </nav>
     </div>
-  </section>
+  </div>
 
   <main class="wrap conteudo" id="painel">
     <div id="status" class="status" aria-live="polite">Carregando…</div>

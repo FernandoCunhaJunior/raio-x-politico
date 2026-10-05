@@ -83,6 +83,7 @@ def main():
     for ano in [int(x) for x in a.anos.split(",") if x.strip()]:
         resumir(a.raw, ano)
         participacao(a.raw, ano)
+        votos_partido_uf(a.raw, ano)
 
 
 
@@ -98,6 +99,23 @@ def participacao(raw, ano):
     with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"participacao_{ano}.csv", d.to_csv(sep=";", index=False))
     print(f"{ano}: participação, {len(d):,} linhas -> {destino}", flush=True)
+
+
+def votos_partido_uf(raw, ano):
+    """votos_partido_uf_AAAA.zip: votos nominais válidos por UF, cargo, turno e partido
+    (base do "viés do voto" no mapa do painel; em presidente, o partido mais votado = vencedor no estado)."""
+    chave = ["SG_UF", "CD_CARGO", "NR_TURNO", "SG_PARTIDO"]
+    d = ler_em_partes(os.path.join(raw, f"votacao_candidato_munzona_{ano}.zip"),
+                      chave + ["QT_VOTOS_NOMINAIS", "QT_VOTOS_NOMINAIS_VALIDOS"], chave,
+                      ["QT_VOTOS_NOMINAIS", "QT_VOTOS_NOMINAIS_VALIDOS"])
+    if not d["QT_VOTOS_NOMINAIS_VALIDOS"].any():  # 2014: sem a coluna de válidos
+        d["QT_VOTOS_NOMINAIS_VALIDOS"] = d["QT_VOTOS_NOMINAIS"]
+    d = d.rename(columns={"QT_VOTOS_NOMINAIS_VALIDOS": "VOTOS"}).drop(columns="QT_VOTOS_NOMINAIS")
+    d = d[d["VOTOS"] > 0]
+    destino = os.path.join(raw, f"votos_partido_uf_{ano}.zip")
+    with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"votos_partido_uf_{ano}.csv", d.to_csv(sep=";", index=False))
+    print(f"{ano}: votos por partido e UF, {len(d):,} linhas -> {destino}", flush=True)
 
 
 if __name__ == "__main__":
