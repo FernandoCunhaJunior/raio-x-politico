@@ -197,7 +197,8 @@ function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleica
     coligacao: coligacao || "",
     // Receitas de campanha (2018+): total, fundo eleitoral (FEFC), fundo partidário
     receita: receita ? { total: receita[0], fefc: receita[1], fp: receita[2], publico: receita[1] + receita[2] } : null,
-    votos: votos ? { n: votos[0], pct: votos[1] } : null, // votos no 1º turno (portal de resultados do TSE)
+    // Votação por turno: [{turno, n (votos), pct (% dos válidos; null se os votos foram anulados), pos, de}]
+    votos: (votos || []).map(([turno, n, pct, pos, de]) => ({ turno, n, pct, pos, de })),
     // Detalhes da situação (scripts/build.py, detalhar_situacao)
     det: det ? {
       julgamento: det[0] || "", totalizacao: det[1] || "", destino: det[2] || "", processo: det[3] || "",
@@ -843,7 +844,7 @@ function secaoVaga(v, dados, escolhas) {
   const lista = dados.cargos[v.cargo] || [];
   const esc0 = escolhas[v.id];
   const linhas = lista.map((c, k) => {
-    const [nr, nome, sigla, , pid, sq, ue, alerta, comp, redes, votos1t] = c;
+    const [nr, nome, sigla, , pid, sq, ue, alerta, comp, redes, votos1t, votos2t] = c;
     const grave = alerta && !/^DEFERIDO/.test(normaliza(alerta));
     const sel = esc0?.tipo === "cand" && esc0.nr === nr;
     const grupo = grupoEspectro(sigla, dados.ano);
@@ -854,6 +855,7 @@ function secaoVaga(v, dados, escolhas) {
         ${alerta ? `<em class="${grave ? "grave" : "leve"}" title="${esc(explicar(GLOSSARIO_SITUACAO, alerta))}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>
           ${explicar(GLOSSARIO_SITUACAO, alerta) ? `<small class="cand-explica">${esc(explicar(GLOSSARIO_SITUACAO, alerta))}</small>` : ""}` : ""}
         ${votos1t ? `<em class="leve">1º turno: ${votos1t[1].toLocaleString("pt-BR", { minimumFractionDigits: 2 })}% dos válidos (${votos1t[0].toLocaleString("pt-BR")} votos)</em>` : ""}
+        ${votos2t ? `<em class="leve"><b>2º turno: ${votos2t[1].toLocaleString("pt-BR", { minimumFractionDigits: 2 })}% dos válidos</b> (${votos2t[0].toLocaleString("pt-BR")} votos)</em>` : ""}
         <span class="cand-links">${iconesRedes(redes, 8)}<a class="cand-tse" href="${esc(tse)}" target="_blank" rel="noopener"
           title="Página oficial do candidato no TSE">${temProposta(v.cargo) ? "📄 proposta de governo" : "página no TSE"} ↗</a></span></span>
       <span class="cand-num">${esc(nr)}</span>
@@ -1326,6 +1328,7 @@ async function mostrarFicha(pid, unica = false) {
       <p class="nota">Fonte: TSE. Em “Chapa”, clique no nome do vice, titular ou suplente para abrir a ficha dele(a).
         Candidaturas com restrição (indeferidas, cassadas, com renúncia etc.) aparecem com o selo vermelho;
         clique em “entenda” para ver o que significa a situação, o motivo informado pelo TSE (2014 em diante) e o número do processo.
+        Votos e percentual dos votos válidos por turno: TSE, de 2014 em diante (a posição compara com todos os candidatos ao mesmo cargo no mesmo local).
         “2º turno” indica que a apuração final não consta no arquivo do TSE.</p>
     </div>`;
   const v = $("#voltar");
@@ -1474,13 +1477,23 @@ function chapaHtml(c) {
   ).join("")}</div>`;
 }
 
+// "1.234.567 votos · 12,34% dos válidos · 2º de 11"
+function fmtVotos(v) {
+  const n = `${v.n.toLocaleString("pt-BR")} voto${v.n === 1 ? "" : "s"}`;
+  const pct = v.pct == null
+    ? (v.n ? ` <span title="Os votos não contaram como válidos (candidatura indeferida, cassada ou com votos anulados)">· anulados</span>` : "")
+    : ` · <strong>${v.pct.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</strong> dos válidos`;
+  const pos = v.pos && v.de > 1 ? ` · ${v.pos}º de ${v.de.toLocaleString("pt-BR")}` : "";
+  return n + pct + pos;
+}
+
 function linhaCand(c) {
   const problema = temProblema(c);
   const sit = c.situacao && !/^(APTO|DEFERIDO)/.test(c.situacao)
     ? `<div>${problema ? `<span class="selo alerta" style="margin:4px 0 0">${esc(cap(c.situacao))}</span>` : `<span class="muted">${esc(cap(c.situacao))}</span>`}</div>` : "";
   const turno2 = /TURNO/.test(normaliza(c.resultado || ""));
   const res = (c.resultado ? (c.eleito || turno2 ? `<span class="selo ${c.eleito ? "ok" : "turno"}" style="margin:0">${esc(cap(c.resultado))}</span>` : esc(cap(c.resultado))) : `<span class="muted">—</span>`)
-    + (c.votos ? `<div class="muted votos-cel">${c.votos.n.toLocaleString("pt-BR")} votos · ${c.votos.pct.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}%</div>` : "");
+    + c.votos.map((v) => `<div class="muted votos-cel">${c.votos.length > 1 || v.turno > 1 ? `<b>${v.turno}º turno:</b> ` : ""}${fmtVotos(v)}</div>`).join("");
   const bens = c.bens === null ? `<span class="muted">n/d</span>` : brl.format(c.bens);
   const colig = c.coligacao ? `<div class="colig" title="Coligação/federação">${esc(c.coligacao)}</div>` : "";
   return `<tr class="${c.eleito ? "eleito" : ""}${problema ? " problema" : ""}">

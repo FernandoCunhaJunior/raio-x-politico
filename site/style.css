@@ -568,3 +568,4 @@ tr.explica-linha:hover { background: none; }
 #ir-restricoes:hover { background: rgba(196, 22, 28, .2); }
 .cand-explica { display: block; font-size: .74rem; line-height: 1.35; color: var(--muted); margin-top: 2px; }
 @media print { .cand-explica { display: none; } }
+.votos-cel { white-space: normal; min-width: 190px; }
