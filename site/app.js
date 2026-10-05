@@ -181,7 +181,7 @@ const NOMES_CADASTRO = {
 };
 
 // Posições definidas em scripts/build.py (gerar)
-function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao, receita, votos]) {
+function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleicao, chapa, porTipo, ocupacao, coligacao, receita, votos, det]) {
   const T = META.tabelas;
   const [uf, local] = T.ue[ue].split("|");
   const [sigla, nomePartido] = T.partido[partido].split("|");
@@ -198,6 +198,12 @@ function candidatura([ano, cargo, ue, partido, situacao, resultado, bens, eleica
     // Receitas de campanha (2018+): total, fundo eleitoral (FEFC), fundo partidário
     receita: receita ? { total: receita[0], fefc: receita[1], fp: receita[2], publico: receita[1] + receita[2] } : null,
     votos: votos ? { n: votos[0], pct: votos[1] } : null, // votos no 1º turno (portal de resultados do TSE)
+    // Detalhes da situação (scripts/build.py, detalhar_situacao)
+    det: det ? {
+      julgamento: det[0] || "", totalizacao: det[1] || "", destino: det[2] || "", processo: det[3] || "",
+      motivos: det[4] || [], coletivo: det[5] ? { anulados: det[5][0], total: det[5][1], motivo: det[5][2] || "" } : null,
+      cassacao: det[6] || "", diploma: det[7] || "",
+    } : null,
   };
 }
 
@@ -217,7 +223,121 @@ const mesRef = () => {
 
 // Situações que merecem destaque (indeferimento, cassação, renúncia...).
 const PROBLEMA = /INDEFER|CASSA|RENUN|CANCEL|INAPTO|FALEC|IMPUGN|NAO CONHEC|INELEG/;
-const temProblema = (c) => PROBLEMA.test(normaliza(c.situacao || "")) || PROBLEMA.test(normaliza(c.resultado || ""));
+const temProblema = (c) => PROBLEMA.test(normaliza(c.situacao || "")) || PROBLEMA.test(normaliza(c.resultado || ""))
+  || (c.det && (PROBLEMA.test(normaliza(c.det.totalizacao)) || /^ANULADO$/.test(normaliza(c.det.destino)) || !!c.det.cassacao));
+
+// ---------- O que significa cada situação ----------
+// Textos em linguagem simples para as situações e motivos usados pelo TSE (chaves normalizadas, sem acento).
+
+const GLOSSARIO_SITUACAO = [
+  [/^APTO$/, "A candidatura estava regular e apta a receber votos."],
+  [/^INAPTO$/, "A candidatura não estava válida no momento da apuração: o registro foi indeferido, cancelado ou cassado, ou houve renúncia ou falecimento. O detalhe abaixo mostra qual foi o caso."],
+  [/^DEFERIDO$/, "A Justiça Eleitoral aprovou o pedido de registro da candidatura."],
+  [/^DEFERIDO (COM RECURSO|EM PRAZO RECURSAL)/, "O registro foi aprovado, mas ainda cabia ou havia recurso contra essa decisão."],
+  [/^INDEFERIDO (COM RECURSO|EM PRAZO RECURSAL)/, "O registro foi negado, mas a candidatura recorreu. Enquanto o recurso não é julgado, ela pode seguir em campanha “sub judice” e os votos ficam pendentes."],
+  [/^INDEFERIDO$/, "A Justiça Eleitoral negou o pedido de registro (por exemplo: falta de documento, inelegibilidade, Ficha Limpa). Votos dados a essa candidatura não são contados como válidos."],
+  [/^CASSADO (COM RECURSO|EM PRAZO RECURSAL)/, "Uma decisão judicial cassou a candidatura, mas ainda cabia ou havia recurso."],
+  [/^CASSADO$/, "Uma decisão judicial posterior ao registro retirou a validade da candidatura ou do diploma. A causa pode ser individual (abuso de poder, compra de voto…) ou da chapa do partido (partido invalidado, fraude à cota de gênero) — veja o motivo abaixo."],
+  [/^RENUNCIA$/, "A própria pessoa desistiu da candidatura."],
+  [/^CANCELADO/, "O registro foi cancelado — em geral a pedido do partido (por exemplo, por expulsão) ou da própria candidatura."],
+  [/^FALEC/, "A candidatura foi encerrada por falecimento."],
+  [/NAO CONHEC/, "O pedido de registro não chegou a ser analisado no mérito (por exemplo, apresentado fora do prazo ou por quem não podia fazê-lo)."],
+  [/^(PENDENTE|AGUARDANDO) (DE )?JULGAMENTO/, "Quando os dados foram gerados, o pedido de registro ainda não tinha sido julgado."],
+  [/^LEVANTADA$/, "A cassação foi revertida (levantada) depois."],
+  [/DESCONSTITUICAO DE DIPLOMA/, "O diploma (documento que permite tomar posse) foi anulado por decisão judicial."],
+];
+const GLOSSARIO_VOTOS = [
+  [/^VALIDO LEGENDA$/, "Os votos foram contados para o partido (legenda), e não para a pessoa."],
+  [/^VALIDO$/, "Os votos foram contados normalmente."],
+  [/^ANULADO SUB JUDICE$/, "Os votos ficaram suspensos à espera do julgamento de recurso: serão validados ou anulados conforme a decisão final."],
+  [/^ANULADO$/, "Os votos recebidos foram anulados por decisão da Justiça Eleitoral — não contam para a pessoa nem para o partido."],
+  [/^NULO/, "Os votos foram contados como nulos porque a candidatura não estava válida no dia da eleição."],
+];
+const GLOSSARIO_MOTIVO = [
+  [/AUSENCIA DE REQUISITO DE REGISTRO/, "faltou algum requisito ou documento exigido para o registro (ex.: comprovante de escolaridade, certidões criminais, foto, quitação eleitoral)"],
+  [/FICHA LIMPA/, "inelegibilidade pela Lei da Ficha Limpa (ex.: condenação por órgão colegiado, contas rejeitadas, cassação anterior)"],
+  [/INELEGIBILIDADE INFRACONSTITUCIONAL/, "inelegibilidade prevista na Lei das Inelegibilidades (LC 64/90)"],
+  [/INELEGIBILIDADE CONSTITUCIONAL/, "inelegibilidade prevista na Constituição (ex.: parentesco com o ocupante do cargo, analfabetismo, terceiro mandato seguido)"],
+  [/CONDICAO DE ELEGIBILIDADE/, "faltou condição de elegibilidade (ex.: filiação partidária no prazo, domicílio eleitoral, idade mínima, direitos políticos)"],
+  [/QUITACAO ELEITORAL/, "pendência com a Justiça Eleitoral (ex.: multa não paga, contas de campanha não prestadas, ausência às urnas sem justificativa)"],
+  [/REQUISITO FORMAL/, "o pedido não cumpriu exigências formais da Lei das Eleições"],
+  [/DESINCOMPATIBILIZACAO/, "não se afastou de cargo ou função pública no prazo exigido por lei"],
+  [/PARTIDO( OU FEDERACAO)? INVALIDADO/, "a chapa do partido foi invalidada — todas as candidaturas dela caem, independentemente da situação de cada pessoa"],
+  [/COTA DE GENERO/, "fraude à cota de gênero: o partido registrou candidaturas femininas fictícias para cumprir o mínimo de 30%, e toda a chapa é anulada"],
+  [/INDEFERIMENTO (DE PARTIDO|DO DRAP)/, "o pedido de participação do partido/coligação (DRAP) foi negado, o que derruba as candidaturas a ele vinculadas"],
+  [/COMPRA DE VOTO|CAPTACAO ILICITA DE SUFRAGIO/, "compra de votos (oferecer vantagem ao eleitor em troca do voto)"],
+  [/ABUSO DE PODER/, "abuso de poder (econômico, político ou de autoridade) que desequilibrou a disputa"],
+  [/CONDUTA VEDADA/, "conduta proibida a agentes públicos durante a campanha (ex.: uso da máquina pública)"],
+  [/GASTO ILICITO|CAPTACAO OU GASTO ILICITO/, "arrecadação ou gasto ilícito de recursos de campanha"],
+  [/MEIOS DE COMUNICACAO/, "uso indevido de meios de comunicação"],
+  [/^IMPUGNACAO$/, "o registro foi contestado (impugnado) e a impugnação foi aceita"],
+  [/NAO AUTORIZADA/, "a candidatura foi registrada sem autorização da própria pessoa"],
+];
+const explicar = (lista, txt) => { const n = normaliza(txt || ""); const a = lista.find(([re]) => re.test(n)); return a ? a[1] : ""; };
+// 06001019820206130039 -> 0600101-98.2020.6.13.0039 (numeração única do CNJ)
+const fmtProcesso = (p) => /^\d{20}$/.test(p) ? `${p.slice(0, 7)}-${p.slice(7, 9)}.${p.slice(9, 13)}.${p.slice(13, 14)}.${p.slice(14, 16)}.${p.slice(16)}` : p;
+
+// Resumo em uma linha do porquê da situação (aparece sem precisar abrir o detalhe).
+function resumoSituacao(c) {
+  const d = c.det;
+  if (d?.coletivo) return `Votos anulados por decisão contra a chapa do partido (${c.sigla}), e não por impedimento pessoal`;
+  if (d?.motivos.length) return `Motivo: ${d.motivos.join("; ")}`;
+  const t = normaliza(d?.totalizacao || ""), j = normaliza(d?.julgamento || "");
+  if (d?.diploma) return "Diploma anulado por decisão judicial";
+  if (/^CASSADO/.test(t) || d?.cassacao) return "Candidatura cassada por decisão judicial";
+  for (const s of [j, t, normaliza(c.situacao || "")]) {
+    if (/^RENUNCIA/.test(s)) return "Renúncia: a própria pessoa desistiu da candidatura";
+    if (/^INDEFERIDO/.test(s)) return "Registro de candidatura negado pela Justiça Eleitoral";
+    if (/^CANCELADO/.test(s)) return "Registro cancelado";
+    if (/^FALEC/.test(s)) return "Falecimento";
+    if (/NAO CONHEC/.test(s)) return "Pedido de registro não analisado no mérito";
+    if (/JULGAMENTO/.test(s)) return "Registro ainda sem julgamento quando os dados foram gerados";
+    if (/RECURSO|RECURSAL/.test(s)) return "Havia recurso pendente contra a decisão sobre o registro";
+  }
+  if (/^ANULADO/.test(normaliza(d?.destino || ""))) return "Votos anulados ou pendentes de decisão judicial";
+  return "O que significa esta situação";
+}
+
+function explicacaoSituacao(c) {
+  const d = c.det;
+  const itens = [];
+  const termo = (rotulo, valor, lista) => {
+    if (!valor) return;
+    const exp = explicar(lista, valor);
+    itens.push(`<li><strong>${rotulo}:</strong> ${esc(cap(valor))}${exp ? ` — ${esc(exp)}` : ""}</li>`);
+  };
+  termo("Situação no cadastro do TSE", c.situacao && !/^(APTO|DEFERIDO)$/.test(c.situacao) ? c.situacao : "", GLOSSARIO_SITUACAO);
+  if (d) {
+    termo("Julgamento do registro", d.julgamento, GLOSSARIO_SITUACAO);
+    if (d.totalizacao && d.totalizacao !== d.julgamento) termo("Situação na apuração", d.totalizacao, GLOSSARIO_SITUACAO);
+    termo("Cassação", d.cassacao, GLOSSARIO_SITUACAO);
+    termo("Diploma", d.diploma, GLOSSARIO_SITUACAO);
+    termo("Votos", d.destino, GLOSSARIO_VOTOS);
+    if (d.motivos.length) {
+      itens.push(`<li><strong>Motivo informado pelo TSE:</strong><ul>${d.motivos.map((m) => {
+        const exp = explicar(GLOSSARIO_MOTIVO, m);
+        return `<li>${esc(m)}${exp ? ` — ${esc(exp)}` : ""}</li>`;
+      }).join("")}</ul></li>`);
+    }
+    if (d.coletivo) {
+      const k = d.coletivo;
+      const exp = k.motivo ? explicar(GLOSSARIO_MOTIVO, k.motivo) : "";
+      itens.push(`<li class="coletivo"><strong>Decisão sobre a chapa do partido:</strong> os votos de ${k.anulados} das ${k.total}
+        candidaturas do ${esc(c.sigla)} a ${esc(cap(c.cargo).toLowerCase())} em ${esc(localTexto(c))} foram anulados juntos.
+        Isso indica uma decisão contra o partido ou a chapa${k.motivo ? ` (motivo registrado na chapa: ${esc(k.motivo)}${exp ? ` — ${esc(exp)}` : ""})` : " (por exemplo, partido invalidado ou fraude à cota de gênero)"},
+        e não um impedimento pessoal desta candidatura${/^DEFERIDO/.test(d.julgamento) ? " — o registro individual tinha sido deferido" : ""}.</li>`);
+    }
+    if (d.processo) {
+      itens.push(`<li><strong>Processo:</strong> nº ${esc(fmtProcesso(d.processo))} —
+        <a href="https://consultaunificadapje.tse.jus.br/" target="_blank" rel="noopener">consulte no PJe da Justiça Eleitoral ↗</a></li>`);
+    }
+  }
+  if (c.linkTse) itens.push(`<li><a href="${esc(c.linkTse)}" target="_blank" rel="noopener">Ver esta candidatura no DivulgaCandContas (TSE) ↗</a></li>`);
+  if (!d && /^\d{4}$/.test(String(c.ano)) && c.ano < 2014) {
+    itens.push(`<li class="muted">Para eleições anteriores a 2014 o TSE não publica o motivo específico em dados abertos.</li>`);
+  }
+  return `<ul class="explica-lista">${itens.join("")}</ul>`;
+}
 
 // Variação do patrimônio entre a eleição em que foi eleito(a) e a declaração seguinte
 // feita durante aquele mandato (4 anos; 8 para senador), em valores corrigidos.
@@ -731,7 +851,8 @@ function secaoVaga(v, dados, escolhas) {
     return `<li class="cand${sel ? " sel" : ""}" data-vaga="${v.id}" data-k="${k}" data-grupo="${esc(grupo)}" data-partido="${esc(c[3])}" data-busca="${esc(normaliza(nome) + " " + nr + " " + normaliza(sigla))}" tabindex="0" role="button" aria-pressed="${sel}">
       <img loading="lazy" referrerpolicy="no-referrer" alt="" src="${FOTO_BASE}/${META.fotos_eleicoes[META.fotos_eleicoes.length - 1]}/${esc(sq)}/${esc(ue)}">
       <span class="cand-info"><strong>${esc(nome)}</strong><small>${esc(sigla)} <span class="tag-esp esp-${GRUPOS_ESPECTRO.indexOf(grupo)}">${esc(grupo)}</span>${comp ? ` · ${esc(comp)}` : ""}</small>
-        ${alerta ? `<em class="${grave ? "grave" : "leve"}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>` : ""}
+        ${alerta ? `<em class="${grave ? "grave" : "leve"}" title="${esc(explicar(GLOSSARIO_SITUACAO, alerta))}">${esc(cap(alerta))}${grave ? " — voto pode ser anulado" : ""}</em>
+          ${explicar(GLOSSARIO_SITUACAO, alerta) ? `<small class="cand-explica">${esc(explicar(GLOSSARIO_SITUACAO, alerta))}</small>` : ""}` : ""}
         ${votos1t ? `<em class="leve">1º turno: ${votos1t[1].toLocaleString("pt-BR", { minimumFractionDigits: 2 })}% dos válidos (${votos1t[0].toLocaleString("pt-BR")} votos)</em>` : ""}
         <span class="cand-links">${iconesRedes(redes, 8)}<a class="cand-tse" href="${esc(tse)}" target="_blank" rel="noopener"
           title="Página oficial do candidato no TSE">${temProposta(v.cargo) ? "📄 proposta de governo" : "página no TSE"} ↗</a></span></span>
@@ -1138,7 +1259,7 @@ async function mostrarFicha(pid, unica = false) {
         <div class="selos-topo">
           ${r.eleicoes.length ? `<span class="selo ok">eleito(a) ${r.eleicoes.length}×</span>` : `<span class="selo neutro">nunca eleito(a)</span>`}
           ${trocas ? `<span class="selo neutro">${trocas} troca${trocas > 1 ? "s" : ""} de partido</span>` : ""}
-          ${problemas.length ? `<span class="selo alerta">${problemas.length} candidatura${problemas.length > 1 ? "s" : ""} com restrição</span>` : ""}
+          ${problemas.length ? `<button type="button" class="selo alerta" id="ir-restricoes" title="Ver o que significa e o motivo de cada restrição">${problemas.length} candidatura${problemas.length > 1 ? "s" : ""} com restrição — entenda</button>` : ""}
           ${seloEspectro(p)}
           ${p.sancoes.length ? `<button type="button" class="selo alerta forte" id="ir-sancoes">⚠ ${p.sancoes.length} registro${p.sancoes.length > 1 ? "s" : ""} em cadastro de sanções</button>` : ""}
         </div>
@@ -1203,13 +1324,21 @@ async function mostrarFicha(pid, unica = false) {
         <tbody>${[...p.cands].reverse().map(linhaCand).join("")}</tbody>
       </table></div>
       <p class="nota">Fonte: TSE. Em “Chapa”, clique no nome do vice, titular ou suplente para abrir a ficha dele(a).
-        Candidaturas com restrição (indeferidas, cassadas, com renúncia etc.) aparecem com o selo vermelho.
+        Candidaturas com restrição (indeferidas, cassadas, com renúncia etc.) aparecem com o selo vermelho;
+        clique em “entenda” para ver o que significa a situação, o motivo informado pelo TSE (2014 em diante) e o número do processo.
         “2º turno” indica que a apuração final não consta no arquivo do TSE.</p>
     </div>`;
   const v = $("#voltar");
   if (v) v.onclick = () => history.back();
   const irS = $("#ir-sancoes");
   if (irS) irS.onclick = () => $("#sancoes").scrollIntoView({ behavior: semAnimacao ? "auto" : "smooth" });
+  const irR = $("#ir-restricoes");
+  if (irR) irR.onclick = () => {
+    const d = $("#ficha tr.explica-linha.problema details");
+    if (!d) return;
+    d.open = true;
+    d.closest("tr").scrollIntoView({ behavior: semAnimacao ? "auto" : "smooth", block: "center" });
+  };
   const irE = $("#ir-espectro");
   if (irE) irE.onclick = () => $("#espectro").scrollIntoView({ behavior: semAnimacao ? "auto" : "smooth", block: "start" });
   for (const b of document.querySelectorAll(".alternar button")) {
@@ -1359,7 +1488,10 @@ function linhaCand(c) {
     <td>${esc(cap(c.cargo))}${c.linkTse ? `<div><a class="link-tse" href="${esc(c.linkTse)}" target="_blank" rel="noopener"
       title="Página oficial desta candidatura no TSE">${temProposta(c.cargo) ? "📄 proposta" : "TSE"} ↗</a></div>` : ""}</td><td>${esc(localTexto(c))}</td>
     <td class="partido-cel" title="${esc(c.nomePartido)}"><strong>${esc(c.sigla)}</strong>${colig}</td>
-    <td>${res}${sit}</td><td class="chapa-cel">${chapaHtml(c)}</td><td class="num">${bens}</td></tr>`;
+    <td>${res}${sit}</td><td class="chapa-cel">${chapaHtml(c)}</td><td class="num">${bens}</td></tr>${
+    problema || c.det ? `<tr class="explica-linha${problema ? " problema" : ""}"><td colspan="7"><details class="explica">
+      <summary><span class="ico-info" aria-hidden="true">i</span>${esc(resumoSituacao(c))}<span class="mais">entenda</span></summary>
+      ${explicacaoSituacao(c)}</details></td></tr>` : ""}`;
 }
 
 // Gráfico de barras empilhadas por categoria de bem. modo: "real" (corrigido pelo IPCA) ou "nominal".

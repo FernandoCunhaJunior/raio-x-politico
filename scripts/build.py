@@ -4,6 +4,8 @@
 Entrada: pasta com os .zip originais do Portal de Dados Abertos do TSE
   - consulta_cand_AAAA.zip  (candidaturas)
   - bem_candidato_AAAA.zip  (bens declarados, 2006 em diante)
+  - consulta_cand_complementar_AAAA.zip e motivo_cassacao_AAAA.zip (situação detalhada,
+    destino dos votos, processo e motivos de indeferimento/cassação, 2014 em diante)
 
 Saída (pasta --out):
   - meta.json          tabelas de códigos (cargos, partidos, locais...) e estatísticas
@@ -58,10 +60,16 @@ COLS_CAND = [
     "DS_GENERO", "DS_GRAU_INSTRUCAO", "DS_COR_RACA", "SG_UF_NASCIMENTO",
     "DS_COMPOSICAO_COLIGACAO", "DS_COMPOSICAO_FEDERACAO",
 ]
+# Detalhes da situação da candidatura (julgamento do registro, cassação, destino dos votos, processo).
+# Até 2016 vêm no próprio consulta_cand; de 2018 em diante, no consulta_cand_complementar_AAAA.zip.
+COLS_DET = ["DS_DETALHE_SITUACAO_CAND", "DS_SITUACAO_CANDIDATO_PLEITO", "DS_SITUACAO_JULGAMENTO",
+            "NM_TIPO_DESTINACAO_VOTOS", "DS_SITUACAO_CANDIDATO_TOT", "DS_SITUACAO_CASSACAO",
+            "DS_SITUACAO_DIPLOMA", "NR_PROCESSO"]
+COLS_CAND += COLS_DET
 COLS_BENS = ["SG_UE", "SQ_CANDIDATO", "VR_BEM_CANDIDATO", "DS_TIPO_BEM_CANDIDATO", "DS_BEM_CANDIDATO"]
 # Colunas que não existem em todos os anos (federações surgiram em 2022): ausentes viram "".
 COLS_OPCIONAIS = {"DS_COMPOSICAO_FEDERACAO", "DS_COMPOSICAO_COLIGACAO", "SG_UF_NASCIMENTO", "DS_COR_RACA",
-                  "NR_ORDEM_REDE_SOCIAL", "NR_ORDEM"}  # redes sociais: "NR_ORDEM" em 2022
+                  "NR_ORDEM_REDE_SOCIAL", "NR_ORDEM", *COLS_DET}  # redes sociais: "NR_ORDEM" em 2022
 
 # Em 2006/2008 quase todo bem foi registrado como "Outros bens e direitos"; para esses tipos
 # genéricos a categoria é deduzida da descrição (texto sem acento, maiúsculo).
@@ -405,6 +413,92 @@ def completar_resultados(df, ano, correcoes):
     return int(herdar.sum() - (res[herdar] == "").sum())
 
 
+def carregar_complementar(raw, ano, df):
+    """Preenche COLS_DET a partir de consulta_cand_complementar_AAAA.zip (2018+), ligando por SQ_CANDIDATO."""
+    caminho = os.path.join(raw, f"consulta_cand_complementar_{ano}.zip")
+    if not os.path.exists(caminho):
+        return 0
+    comp = ler_csv(caminho, ["SQ_CANDIDATO", *COLS_DET]).drop_duplicates("SQ_CANDIDATO", keep="last")
+    comp = comp.set_index("SQ_CANDIDATO").reindex(df["SQ_CANDIDATO"])
+    for c in COLS_DET:
+        v = comp[c].fillna("").to_numpy()
+        df[c] = np.where(v != "", v, df[c].to_numpy())
+    return int(comp[COLS_DET].notna().any(axis=1).sum())
+
+
+def carregar_motivos(raw, ano):
+    """Motivos (fundamentos legais) do indeferimento/cassação: motivo_cassacao_AAAA.zip -> {"UE|SQ": [motivos]}."""
+    caminho = os.path.join(raw, f"motivo_cassacao_{ano}.zip")
+    if not os.path.exists(caminho):
+        return {}
+    with zipfile.ZipFile(caminho) as z:
+        nome = next(n for n in z.namelist() if n.lower().endswith(".csv"))
+        with z.open(nome) as f:
+            cab = f.readline().decode("latin-1")
+    col = "DS_MOTIVO_CASSACAO" if "DS_MOTIVO_CASSACAO" in cab else "DS_MOTIVO"
+    m = ler_csv(caminho, ["SG_UE", "SQ_CANDIDATO", col])
+    m[col] = m[col].str.strip().str.rstrip(".").str.strip()
+    m = m[m[col] != ""].drop_duplicates()
+    return (m.groupby(m["SG_UE"] + "|" + m["SQ_CANDIDATO"])[col]
+             .agg(lambda s: list(dict.fromkeys(s))).to_dict())
+
+
+MOTIVO_COLETIVO = re.compile(r"PARTIDO|DRAP|COLIGA|FEDERA|COTA DE G", re.I)
+
+
+def detalhar_situacao(df, motivos):
+    """Explicação da situação de cada candidatura (só quando há algo a explicar).
+
+    Retorna, por linha, None ou [julgamento, situação na totalização, destino dos votos, processo,
+    motivos, decisão coletiva, cassação, diploma] (campos finais vazios cortados). "Decisão coletiva" =
+    [anulados, total, motivo do grupo]: quando os votos de (quase) toda a chapa do partido para o cargo
+    naquele local foram anulados juntos (ex.: partido invalidado, fraude à cota de gênero), o problema
+    não é da pessoa, e sim do partido/chapa.
+    """
+    # Julgamento do registro individual (2024+: DS_SITUACAO_JULGAMENTO; 2018-2022: situação no pleito;
+    # até 2016: detalhe da situação). Cassações posteriores aparecem na totalização/cassação.
+    jul = df["DS_SITUACAO_JULGAMENTO"].where(df["DS_SITUACAO_JULGAMENTO"] != "", df["DS_SITUACAO_CANDIDATO_PLEITO"])
+    jul = jul.where(jul != "", df["DS_DETALHE_SITUACAO_CAND"]).str.upper()
+    tot = df["DS_SITUACAO_CANDIDATO_TOT"].str.upper()
+    destino = df["NM_TIPO_DESTINACAO_VOTOS"]
+    chave = df["SG_UE"] + "|" + df["SQ_CANDIDATO"]
+    mot = chave.map(motivos)
+
+    # Decisão coletiva: grupos (local, cargo, partido) com 3+ candidaturas que receberam votos,
+    # e 80%+ delas com votos anulados/cassadas ao mesmo tempo.
+    anulado = destino.str.startswith("Anulado") | tot.str.startswith("CASSADO")
+    com_voto = destino.str.match(r"V[áa]lido|Anulado|Nulo")
+    grupo = df["SG_UE"] + "|" + df["DS_CARGO"] + "|" + df["SG_PARTIDO"]
+    g = pd.DataFrame({"g": grupo, "a": anulado & com_voto, "v": com_voto})
+    soma = g.groupby("g")[["a", "v"]].transform("sum")
+    coletivo = anulado & (soma["v"] >= 3) & (soma["a"] >= 3) & (soma["a"] >= 0.8 * soma["v"])
+    motivo_grupo = {}
+    for gk, ms in zip(grupo[coletivo], mot[coletivo]):
+        if isinstance(ms, list):
+            for x in ms:
+                if MOTIVO_COLETIVO.search(x):
+                    motivo_grupo.setdefault(gk, x)
+
+    sit = df["DS_SITUACAO_CANDIDATURA"].str.upper()
+    notavel = ((~sit.isin(["", "APTO", "DEFERIDO"])) | mot.notna() | destino.str.startswith(("Anulado", "Nulo"))
+               | ~tot.isin(["", "DEFERIDO", "APTO"]) | (df["DS_SITUACAO_CASSACAO"] != "")
+               | (df["DS_SITUACAO_DIPLOMA"] != "") | ~jul.isin(["", "DEFERIDO", "APTO"]))
+    saida = np.full(len(df), None, dtype=object)
+    for i in np.flatnonzero(notavel.to_numpy()):
+        col = None
+        if coletivo.iat[i]:
+            gk = grupo.iat[i]
+            col = [int(soma["a"].iat[i]), int(soma["v"].iat[i]), motivo_grupo.get(gk, "")]
+        cassacao = df["DS_SITUACAO_CASSACAO"].iat[i]
+        d = [jul.iat[i], tot.iat[i], destino.iat[i], df["NR_PROCESSO"].iat[i],
+             mot.iat[i] if isinstance(mot.iat[i], list) else None, col,
+             "" if cassacao.upper() == "REGULAR" else cassacao, df["DS_SITUACAO_DIPLOMA"].iat[i]]
+        while d and d[-1] in (None, ""):
+            d.pop()
+        saida[i] = d or None
+    return saida, int(coletivo.sum())
+
+
 def carregar_candidaturas(raw, anos, bens, tab, receitas):
     correcoes = carregar_correcoes()
     blocos = []
@@ -435,6 +529,11 @@ def carregar_candidaturas(raw, anos, bens, tab, receitas):
                 pct = achado.map(lambda x: x[2] if isinstance(x, tuple) else np.nan).to_numpy(dtype=float)
                 log(f"resultados {ano}: aplicados a {int(tem.sum()):,} candidaturas")
         herdados = completar_resultados(df, ano, correcoes)
+        n_comp = carregar_complementar(raw, ano, df)
+        motivos = carregar_motivos(raw, ano)
+        det, n_coletivo = detalhar_situacao(df, motivos)
+        log(f"situação {ano}: complementar em {n_comp:,}, motivos de {len(motivos):,}, "
+            f"{sum(x is not None for x in det):,} com explicação, {n_coletivo:,} em decisão coletiva da chapa")
         suplementar = df["NM_TIPO_ELEICAO"].str.upper().str.contains("SUPLEMENTAR")
         eleicao = df["DS_ELEICAO"].where(suplementar, "")
         n_cat = len(CATEGORIAS)
@@ -489,6 +588,7 @@ def carregar_candidaturas(raw, anos, bens, tab, receitas):
             "sq": df["SQ_CANDIDATO"].to_numpy(),
             "uf": df["SG_UF"].to_numpy(),
             "nr_partido": df["NR_PARTIDO"].to_numpy(),
+            "det": det,
         }))
         extra = f", {com_bens:.0%} com bens declarados" if com_bens is not None else ""
         log(f"candidaturas {ano}: {len(df):,}{extra}, {herdados:,} resultados de vice/suplente herdados do titular")
@@ -604,7 +704,7 @@ def cruzar_sancoes(df, nome_norm, sancoes):
 
 
 def cpf_valido(cpf):
-    return cpf.str.fullmatch(r"\d{11}") & ~cpf.str.fullmatch(r"(\d)\1{10}")
+    return cpf.str.fullmatch(r"\d{11}") & ~cpf.isin([d * 11 for d in "0123456789"])  # sem \1: pyarrow não aceita
 
 
 def mascarar_cpf(cpf):
@@ -888,7 +988,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
            ["pid", "ano", "eleicao", "cargo", "ue", "partido", "situacao", "resultado",
             "ocupacao", "bens", "nome", "urna", "nasc", "nome_norm", "cpf_mask",
             "genero", "instrucao", "cor", "uf_nasc", "coligacao", "sanc", "sq", "sg_ue", "uf",
-            "rec_total", "rec_fefc", "rec_fp", "votos", "pct_validos",
+            "rec_total", "rec_fefc", "rec_fp", "votos", "pct_validos", "det",
             *[f"b{i}" for i in range(n_cat)]]}
     com_sancao = com_foto = com_redes = 0
     redes = carregar_redes(raw)
@@ -924,6 +1024,8 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
             # 6 bens (total), 7 eleição suplementar, 8 chapa, 9 bens por categoria, 10 ocupação, 11 coligação,
             # 12 receitas de campanha [total, fundo eleitoral (FEFC), fundo partidário],
             # 13 votos no 1º turno [votos, % dos válidos] (portal de resultados; hoje só a eleição mais recente).
+            # 14 detalhes da situação (ver detalhar_situacao): [julgamento, totalização, destino dos votos,
+            #    processo, motivos, decisão coletiva, cassação, diploma] ou ausente.
             rt = col["rec_total"][i]
             receita = None if np.isnan(rt) else [int(round(rt)), int(round(col["rec_fefc"][i])), int(round(col["rec_fp"][i]))]
             vt = col["votos"][i]
@@ -938,6 +1040,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
                 col["coligacao"][i],
                 receita,
                 votos,
+                col["det"][i],
             ]
             while len(cand) > 8 and cand[-1] in (None, "", 0):  # corta campos finais vazios
                 cand.pop()

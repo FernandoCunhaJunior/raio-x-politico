@@ -542,3 +542,29 @@ td.partido-cel { white-space: normal; min-width: 90px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Explicação da situação da candidatura ("entenda") */
+tr:has(+ tr.explica-linha) td { border-bottom: 0; }
+tr.explica-linha td { padding-top: 0; }
+tr.explica-linha.problema td:first-child { box-shadow: inset 4px 0 0 var(--vermelho); }
+.explica { font-size: .86rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.explica summary { cursor: pointer; padding: 7px 10px; display: flex; align-items: center; gap: 8px; list-style: none; color: var(--ink, inherit); }
+.explica summary::-webkit-details-marker { display: none; }
+.explica .ico-info { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--vermelho); color: #fff; font: 700 .72rem/1 Georgia, serif; font-style: italic; }
+tr.explica-linha:not(.problema) .ico-info { background: var(--muted); }
+.explica .mais { margin-left: auto; flex: none; font-size: .78rem; color: var(--vermelho); font-weight: 600; white-space: nowrap; }
+.explica .mais::after { content: " ▾"; }
+.explica[open] .mais::after { content: " ▴"; }
+.explica-lista { margin: 0; padding: 4px 14px 10px 30px; display: grid; gap: 6px; line-height: 1.45; }
+.explica-lista ul { margin: 4px 0 0; padding-left: 18px; }
+.explica-lista li.coletivo { background: rgba(196, 22, 28, .07); border-radius: 8px; padding: 6px 8px; list-style: none; margin-left: -16px; }
+@media print { .explica { break-inside: avoid; } }
+tr.explica-linha td { white-space: normal; }
+tr.explica-linha:hover { background: none; }
+/* Em telas estreitas a tabela rola na horizontal: a explicação fica presa à esquerda e cabe na tela */
+.explica { position: sticky; left: 0; max-width: min(900px, calc(100vw - 92px)); }
+#ir-restricoes { cursor: pointer; font-family: inherit; }
+#ir-restricoes:hover { background: rgba(196, 22, 28, .2); }
+.cand-explica { display: block; font-size: .74rem; line-height: 1.35; color: var(--muted); margin-top: 2px; }
+@media print { .cand-explica { display: none; } }
