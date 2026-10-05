@@ -82,6 +82,22 @@ def main():
     a = ap.parse_args()
     for ano in [int(x) for x in a.anos.split(",") if x.strip()]:
         resumir(a.raw, ano)
+        participacao(a.raw, ano)
+
+
+
+def participacao(raw, ano):
+    """participacao_AAAA.zip: comparecimento, abstenção, válidos, brancos e nulos por UF, cargo e turno
+    (somados das zonas do detalhe_votacao_munzona; SG_UF "ZZ" = exterior)."""
+    cols = ["QT_APTOS", "QT_COMPARECIMENTO", "QT_ABSTENCOES", "QT_VOTOS_NOMINAIS_VALIDOS",
+            "QT_TOTAL_VOTOS_LEG_VALIDOS", "QT_VOTOS_BRANCOS", "QT_TOTAL_VOTOS_NULOS"]
+    d = ler_em_partes(os.path.join(raw, f"detalhe_votacao_munzona_{ano}.zip"),
+                      ["SG_UF", "CD_CARGO", "NR_TURNO", *cols], ["SG_UF", "CD_CARGO", "NR_TURNO"], cols)
+    d["VALIDOS"] = d.pop("QT_VOTOS_NOMINAIS_VALIDOS") + d.pop("QT_TOTAL_VOTOS_LEG_VALIDOS")
+    destino = os.path.join(raw, f"participacao_{ano}.zip")
+    with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"participacao_{ano}.csv", d.to_csv(sep=";", index=False))
+    print(f"{ano}: participação, {len(d):,} linhas -> {destino}", flush=True)
 
 
 if __name__ == "__main__":

@@ -837,6 +837,11 @@ def sigla_norm(s):
     return re.sub(r"\s+", "", s or "").upper()
 
 
+# Faixas definidas pelos autores (limite superior de cada categoria)
+FAIXAS_ESPECTRO = [[1.5, "Extrema-esquerda"], [3.0, "Esquerda"], [4.49, "Centro-esquerda"], [5.5, "Centro"],
+                   [7.0, "Centro-direita"], [8.5, "Direita"], [10.0, "Extrema-direita"]]
+
+
 def carregar_classificacao_partidos():
     """Regras [sigla normalizada, ano_inicio, sigla no estudo, nota] de scripts/partidos_classificacao.csv."""
     caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "partidos_classificacao.csv")
@@ -1154,6 +1159,12 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
     for c in ("nr", "urna", "nr_partido"):
         col[c] = df[c].to_numpy()
     colinha = gerar_colinha(col, chapas, tab, out, raw, redes)
+    # Painel das eleições (página painel.html): agregados por ano, UF e cargo
+    from painel import gerar_painel
+    gerar_painel(df, tab, out, raw, {
+        "normaliza": normaliza, "sigla_norm": sigla_norm, "regras": carregar_classificacao_partidos(),
+        "faixas": FAIXAS_ESPECTRO, "log": log, "cap": cap_py, "eleito_re": re.compile(r"ELEITO|MEDIA$"),
+        "resultados_portal": RESULTADOS_PORTAL, "ler_jws": _ler_jws, "ufs_br": UFS_BR})
     anos = sorted(int(a) for a in np.unique(col["ano"]))
     meta = {
         "gerado_em": time.strftime("%Y-%m-%d"),
@@ -1179,8 +1190,7 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
                      "Políticos Brasileiros. Dados, v. 66, n. 2, 2023.",
             "doi": "https://doi.org/10.1590/dados.2023.66.2.303",
             # Faixas definidas pelos autores (limite superior de cada categoria)
-            "faixas": [[1.5, "Extrema-esquerda"], [3.0, "Esquerda"], [4.49, "Centro-esquerda"], [5.5, "Centro"],
-                       [7.0, "Centro-direita"], [8.5, "Direita"], [10.0, "Extrema-direita"]],
+            "faixas": FAIXAS_ESPECTRO,
             "regras": carregar_classificacao_partidos(),
         },
     }

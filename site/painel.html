@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painel das Eleições · Lente Pública</title>
+  <meta name="description" content="Lente Pública (MPBA/UNAI) — painel das eleições brasileiras por ano, estado e cargo: candidaturas, eleitos, partidos, espectro político, perfil, financiamento, restrições e participação do eleitor.">
+  <meta name="theme-color" content="#2a2a2d">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232a2a2d'/%3E%3Cpath d='M10 16 L24 48 L32 30 L40 48 L54 16' fill='none' stroke='%23c4161c' stroke-width='8' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="painel.css">
+</head>
+<body class="pagina-painel">
+  <header class="barra-marca">
+    <div class="wrap barra-inner">
+      <a href="./" class="logo logo-mpba" aria-label="Lente Pública — início">
+        <img src="assets/logo-mpba.png" width="300" height="81" alt="Ministério Público do Estado da Bahia">
+      </a>
+      <span class="logo logo-unai">
+        <img src="assets/logo-unai.webp" width="2000" height="500" alt="UNAI — Unidade de Assessoramento e Investigação">
+      </span>
+    </div>
+  </header>
+
+  <section class="painel-topo">
+    <div class="wrap">
+      <a class="painel-voltar" href="./">← Lente Pública: consulta por nome</a>
+      <h1>Painel das <span>Eleições</span></h1>
+      <p class="lead">Escolha o ano, o estado e o cargo para ver quem disputou, quem venceu, os partidos, o perfil dos candidatos,
+        o dinheiro das campanhas, as candidaturas barradas e a participação do eleitor.</p>
+      <form class="painel-filtros" id="filtros" aria-label="Filtros do painel">
+        <label>Ano <select id="f-ano"></select></label>
+        <label>Estado <select id="f-uf"></select></label>
+        <label>Cargo <select id="f-cargo"></select></label>
+      </form>
+      <nav class="painel-nav" aria-label="Seções do painel">
+        <a href="#s-panorama">Panorama</a><a href="#s-partidos">Partidos e espectro</a><a href="#s-perfil">Perfil</a>
+        <a href="#s-dinheiro">Dinheiro</a><a href="#s-restricoes">Restrições</a><a href="#s-participacao">Participação</a>
+      </nav>
+    </div>
+  </section>
+
+  <main class="wrap conteudo" id="painel">
+    <div id="status" class="status" aria-live="polite">Carregando…</div>
+  </main>
+
+  <footer class="rodape">
+    <div class="wrap rodape-inner">
+      <div class="rodape-marca">
+        <img src="assets/logo-mpba.png" width="300" height="81" alt="Ministério Público do Estado da Bahia" loading="lazy">
+        <img src="assets/logo-unai.webp" width="2000" height="500" alt="UNAI" loading="lazy">
+      </div>
+      <div class="rodape-texto">
+        <p><strong>Ministério Público do Estado da Bahia · UNAI — Unidade de Assessoramento e Investigação</strong></p>
+        <p>Dados: <a href="https://dadosabertos.tse.jus.br" target="_blank" rel="noopener">Portal de Dados Abertos do TSE</a>
+          (candidaturas, bens, receitas, votação e comparecimento) e, para a eleição em curso,
+          <a href="https://resultados.tse.jus.br" target="_blank" rel="noopener">portal de resultados do TSE</a>. <span id="meta-info"></span></p>
+        <p>Contam-se apenas os cargos titulares (vices e suplentes ficam de fora) das eleições ordinárias. “Eleito” reflete o resultado
+          da eleição. Espectro dos partidos: <a href="./#partidos=1">Bolognesi, Ribeiro e Codato (2023)</a>, classificação do partido e não
+          da pessoa. Mapa: <a href="https://github.com/VictorCazanave/svg-maps" target="_blank" rel="noopener">svg-maps/brazil</a> (CC BY 4.0).
+          Estatísticas de acesso agregadas e anônimas (Cloudflare Web Analytics, sem cookies).</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="painel.js"></script>
+  <!-- Cloudflare Web Analytics (estatísticas agregadas, sem cookies) --><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "769c4a37105741e1963e0ae988e06894"}'></script><!-- End Cloudflare Web Analytics -->
+</body>
+</html>
