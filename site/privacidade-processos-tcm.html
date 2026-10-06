@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidade — Processos de Pagamento TCM/BA</title>
+<style>
+  :root { --vermelho: #c4161c; --texto: #1d1d1f; --suave: #66646a; --fundo: #f4f3f1; --cartao: #fff; --borda: #e4e2de; }
+  @media (prefers-color-scheme: dark) {
+    :root { --texto: #ecebe8; --suave: #a5a3a8; --fundo: #141416; --cartao: #1d1d20; --borda: #313136; }
+  }
+  body { margin: 0; background: var(--fundo); color: var(--texto); font: 16px/1.6 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 32px auto; padding: 28px 24px; background: var(--cartao);
+         border: 1px solid var(--borda); border-top: 4px solid var(--vermelho); border-radius: 14px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 28px 0 8px; }
+  .data { color: var(--suave); margin: 0 0 20px; }
+  @media (max-width: 800px) { main { margin: 0; border-radius: 0; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Política de Privacidade</h1>
+  <p class="data">Extensão “Processos de Pagamento — TCM/BA” · versão 1.0 · outubro de 2026</p>
+
+  <h2>O que a extensão faz</h2>
+  <p>A extensão ajuda servidores a localizar e baixar, na Consulta Pública do e-TCM/BA
+    (<code>e.tcm.ba.gov.br</code>), os processos de pagamento listados no relatório
+    “Consulta Pagamento Empenho” do SIGA, e organiza os arquivos com uma planilha de conferência.</p>
+
+  <h2>Dados tratados</h2>
+  <ul>
+    <li><strong>Relatório do SIGA escolhido pelo usuário:</strong> é lido apenas no próprio computador,
+      dentro do navegador. Ele contém dados de despesa pública (unidade, processos, credores, CNPJ/CPF,
+      datas e valores).</li>
+    <li><strong>Consultas ao e-TCM/BA:</strong> para fazer a busca, a extensão informa ao site público
+      do TCM/BA o nome da unidade, o ano, o mês e o número de cada processo — as mesmas informações que
+      a pessoa digitaria manualmente na Consulta Pública. Nomes de credores e CNPJ/CPF não são enviados.</li>
+    <li><strong>Arquivos baixados:</strong> os PDFs, a planilha e uma cópia do relatório são gravados na
+      pasta Downloads do próprio computador.</li>
+  </ul>
+
+  <h2>O que a extensão NÃO faz</h2>
+  <ul>
+    <li>Não envia dados para nenhum servidor dos desenvolvedores nem de terceiros.</li>
+    <li>Não usa cookies próprios, rastreadores, publicidade ou ferramentas de análise de uso.</li>
+    <li>Não acessa nenhum outro site além de <code>e.tcm.ba.gov.br</code>.</li>
+    <li>Não guarda histórico: ao fechar a aba da extensão, os dados carregados são descartados.
+      Ficam apenas os arquivos salvos na pasta Downloads, sob controle do usuário.</li>
+  </ul>
+
+  <h2>Permissões do navegador</h2>
+  <ul>
+    <li><strong>Acesso a e.tcm.ba.gov.br:</strong> para navegar na Consulta Pública e obter os PDFs.</li>
+    <li><strong>Scripts (scripting):</strong> para preencher os filtros e clicar nos documentos na página
+      do e-TCM, como o usuário faria.</li>
+    <li><strong>Downloads:</strong> para gravar os PDFs e a planilha na pasta Downloads.</li>
+  </ul>
+
+  <h2>Contato</h2>
+  <p>Unidade de Assessoramento e Investigação (UNAI) — Ministério Público do Estado da Bahia.<br>
+    E-mail: <a href="mailto:fernando.cunha@mpba.mp.br">fernando.cunha@mpba.mp.br</a></p>
+</main>
+</body>
+</html>
