@@ -1165,6 +1165,9 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
         "normaliza": normaliza, "sigla_norm": sigla_norm, "regras": carregar_classificacao_partidos(),
         "faixas": FAIXAS_ESPECTRO, "log": log, "cap": cap_py, "eleito_re": re.compile(r"ELEITO|MEDIA$"),
         "resultados_portal": RESULTADOS_PORTAL, "ler_jws": _ler_jws, "ufs_br": UFS_BR})
+    # Página por município (municipio.html)
+    from municipio import gerar_municipios
+    gerar_municipios(df, tab, out, raw, {"normaliza": normaliza, "log": log, "cap": cap_py})
     anos = sorted(int(a) for a in np.unique(col["ano"]))
     meta = {
         "gerado_em": time.strftime("%Y-%m-%d"),

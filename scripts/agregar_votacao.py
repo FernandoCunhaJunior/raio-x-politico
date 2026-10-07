@@ -84,6 +84,7 @@ def main():
         resumir(a.raw, ano)
         participacao(a.raw, ano)
         votos_partido_uf(a.raw, ano)
+        municipios(a.raw, ano)
 
 
 
@@ -116,6 +117,42 @@ def votos_partido_uf(raw, ano):
     with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(f"votos_partido_uf_{ano}.csv", d.to_csv(sep=";", index=False))
     print(f"{ano}: votos por partido e UF, {len(d):,} linhas -> {destino}", flush=True)
+
+
+TOP_DEPUTADOS_MUNICIPIO = 15  # deputados mais votados guardados por município (os demais somam pouco)
+
+
+def municipios(raw, ano):
+    """municipio_AAAA.zip, base da página por município:
+      - part.csv:  comparecimento por município, cargo e turno (todos os anos)
+      - votos.csv: votos válidos por município, cargo, turno e candidato nas eleições GERAIS
+                   (presidente, governador e senador: todos; deputados: os 15 mais votados no município)
+    Nas eleições municipais a votação de prefeito e vereador já está em votacao_resumo (SG_UE = município)."""
+    cols = ["QT_APTOS", "QT_COMPARECIMENTO", "QT_ABSTENCOES", "QT_VOTOS_NOMINAIS_VALIDOS",
+            "QT_TOTAL_VOTOS_LEG_VALIDOS", "QT_VOTOS_BRANCOS", "QT_TOTAL_VOTOS_NULOS"]
+    chave_p = ["SG_UF", "CD_MUNICIPIO", "NM_MUNICIPIO", "CD_CARGO", "NR_TURNO"]
+    p = ler_em_partes(os.path.join(raw, f"detalhe_votacao_munzona_{ano}.zip"), chave_p + cols, chave_p, cols)
+    p["VALIDOS"] = p.pop("QT_VOTOS_NOMINAIS_VALIDOS") + p.pop("QT_TOTAL_VOTOS_LEG_VALIDOS")
+    arquivos = {"part.csv": p}
+    if ano % 4 == 2:  # eleição geral
+        chave = ["SG_UF", "CD_MUNICIPIO", "CD_CARGO", "NR_TURNO", "SQ_CANDIDATO"]
+        v = ler_em_partes(os.path.join(raw, f"votacao_candidato_munzona_{ano}.zip"),
+                          chave + ["QT_VOTOS_NOMINAIS", "QT_VOTOS_NOMINAIS_VALIDOS"], chave,
+                          ["QT_VOTOS_NOMINAIS", "QT_VOTOS_NOMINAIS_VALIDOS"])
+        if not v["QT_VOTOS_NOMINAIS_VALIDOS"].any():
+            v["QT_VOTOS_NOMINAIS_VALIDOS"] = v["QT_VOTOS_NOMINAIS"]
+        v = v.rename(columns={"QT_VOTOS_NOMINAIS_VALIDOS": "VOTOS"}).drop(columns="QT_VOTOS_NOMINAIS")
+        v = v[v["VOTOS"] > 0]
+        v["CD_CARGO"] = v["CD_CARGO"].astype(int)
+        deputado = v["CD_CARGO"].isin([6, 7, 8])
+        pos = v.groupby(["CD_MUNICIPIO", "CD_CARGO", "NR_TURNO"])["VOTOS"].rank(method="first", ascending=False)
+        v = v[~deputado | (pos <= TOP_DEPUTADOS_MUNICIPIO)]
+        arquivos["votos.csv"] = v
+    destino = os.path.join(raw, f"municipio_{ano}.zip")
+    with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
+        for nome, d in arquivos.items():
+            z.writestr(nome, d.to_csv(sep=";", index=False))
+    print(f"{ano}: municípios, " + ", ".join(f"{k} {len(d):,} linhas" for k, d in arquivos.items()) + f" -> {destino}", flush=True)
 
 
 if __name__ == "__main__":

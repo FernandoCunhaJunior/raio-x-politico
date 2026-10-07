@@ -65,6 +65,9 @@ jobs:
       - name: Versionar arquivos do painel
         run: sed -i "s/painel\.js\"/painel.js?v=${GITHUB_SHA::8}\"/; s/painel\.css\"/painel.css?v=${GITHUB_SHA::8}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::8}\"/" site/painel.html
 
+      - name: Versionar arquivos da página por município
+        run: sed -i "s/municipio\.js\"/municipio.js?v=${GITHUB_SHA::8}\"/; s/municipio\.css\"/municipio.css?v=${GITHUB_SHA::8}\"/; s/painel\.css\"/painel.css?v=${GITHUB_SHA::8}\"/; s/style\.css\"/style.css?v=${GITHUB_SHA::8}\"/" site/municipio.html
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
