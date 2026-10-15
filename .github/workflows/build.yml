@@ -54,7 +54,7 @@ jobs:
           gh release download dados-tse -R FernandoCunhaJunior/raio-x-politico-dados --dir raw --pattern "*.zip"
 
       - name: Processar
-        run: python scripts/build.py --raw raw --out site/data --anos "${{ inputs.anos }}"
+        run: python scripts/build_unai.py --raw raw --out site/data --anos "${{ inputs.anos }}"
 
       - name: Tamanho da saída
         run: du -sh site/data site/data/* && find site/data -type f | wc -l
