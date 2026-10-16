@@ -6,6 +6,8 @@ do site. Por isso geramos uma cópia simplificada, fatiada pelo PRIMEIRO NOME no
   data/unai/meta.json             {"versao", "gerado_em", "ufs", "arquivos": {"BA": n}}
   data/unai/<UF>/<PRIMEIRONOME>.json
       [ {pessoa}, ... ]  — só pessoas com ao menos uma candidatura na UF
+  data/unai/<UF>/_indice_<LETRA>.txt
+      " NOME1 NOME2 ... "  — primeiros nomes que têm arquivo (o fluxo confere antes de baixar)
 
 O fluxo do Power Automate:
   1. recebe o nome do investigado (o app já envia normalizado: sem acento, maiúsculo);
@@ -109,7 +111,18 @@ def gerar_unai(col, tab, out, inicios, fins, ctx, ufs=("BA",), site="https://len
             lista.sort(key=lambda p: (not p["jaEleito"], -p["ultimoAno"]))
             with open(os.path.join(base, uf, f"{primeiro}.json"), "w", encoding="utf-8") as f:
                 json.dump(lista, f, ensure_ascii=False, separators=(",", ":"))
-        resumo[uf] = {"arquivos": len(por_nome), "pessoas": sum(len(v) for v in por_nome.values())}
+        # Índice por letra inicial (_indice_A.txt ...): " NOME1 NOME2 ... ". O fluxo consulta o índice
+        # antes de baixar o arquivo do nome, e assim nunca pede um arquivo que não existe (404).
+        por_letra = defaultdict(list)
+        for primeiro in por_nome:
+            por_letra[primeiro[0]].append(primeiro)
+        for letra in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":  # todas as letras, mesmo sem nomes: o índice sempre existe
+            por_letra.setdefault(letra, [])
+        for letra, nomes in por_letra.items():
+            with open(os.path.join(base, uf, f"_indice_{letra}.txt"), "w", encoding="utf-8") as f:
+                f.write(" " + " ".join(sorted(nomes)) + " ")
+        resumo[uf] = {"arquivos": len(por_nome), "pessoas": sum(len(v) for v in por_nome.values()),
+                      "indices": len(por_letra)}
         log(f"UNAI {uf}: {resumo[uf]['pessoas']:,} pessoas em {resumo[uf]['arquivos']:,} arquivos")
     with open(os.path.join(base, "meta.json"), "w", encoding="utf-8") as f:
         json.dump({"gerado_em": ctx.get("gerado_em"), "ufs": resumo,
