@@ -798,7 +798,12 @@ async function mostrarColinha(uf, imprimir) {
   setStatus("");
   const el = $("#explorar");
   el.hidden = false;
-  if (!META.colinha) { el.innerHTML = `<div class="bloco"><p class="muted">A colinha ainda não está disponível.</p></div>`; return; }
+  if (!META.colinha) {
+    el.innerHTML = `<div class="bloco"><h3>Colinha fora do ar</h3><p class="muted">A colinha é publicada apenas no período eleitoral, com os
+      candidatos que estarão na urna. Ela volta nas próximas eleições. Enquanto isso, consulte qualquer candidato pelo nome ou use o
+      <a href="painel.html">Painel das eleições</a> e a página <a href="municipio.html">Eleições no seu município</a>.</p></div>`;
+    return;
+  }
   const topo = (etapa) => `<div class="explorar-topo"><nav class="trilha"><a href="#colinha=1">Colinha</a>${uf ? `<span class="sep">›</span>${imprimir
     ? `<a href="#colinha=1&uf=${uf}">${esc(NOMES_UF[uf])}</a><span class="sep">›</span><span aria-current="page">Imprimir</span>`
     : `<span aria-current="page">${esc(NOMES_UF[uf])}</span>`}` : ""}</nav><span class="etapa">${etapa}</span></div>`;
@@ -1626,6 +1631,9 @@ async function iniciar() {
     $("#n-anos").textContent = `${META.anos.length} (${META.anos[0]}–${META.anos[META.anos.length - 1]})`;
     const versaoSite = (document.querySelector('script[src*="app.js"]')?.src.match(/v=([a-f0-9]+)/) || [])[1] || "local";
     $("#meta-info").textContent = `Base atualizada em ${META.gerado_em.split("-").reverse().join("/")} · versão ${versaoSite}.`;
+    // Colinha desativada fora do período eleitoral (META.colinha = null): o botão some da capa. Ver docs/COLINHA.md.
+    const botaoColinha = document.querySelector(".botao-colinha");
+    if (botaoColinha) botaoColinha.hidden = !META.colinha;
     const subColinha = document.querySelector(".botao-colinha small");
     if (subColinha && META.colinha?.data_eleicao) {
       subColinha.textContent = turnoColinha() === 2

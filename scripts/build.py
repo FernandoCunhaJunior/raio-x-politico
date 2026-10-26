@@ -940,6 +940,9 @@ def chaves_busca(nome_norm, urnas_norm):
 
 
 CARGOS_COLINHA = ["DEPUTADO FEDERAL", "DEPUTADO ESTADUAL", "DEPUTADO DISTRITAL", "SENADOR", "GOVERNADOR", "PRESIDENTE"]
+# Colinha (volante do eleitor): só faz sentido perto de uma eleição. Fora desse período fica desligada:
+# o build não gera data/colinha/ e o site esconde o botão. Como reativar: docs/COLINHA.md.
+COLINHA_ATIVA = False
 
 
 def gerar_colinha(col, chapas, tab, out, raw, redes=None):
@@ -1158,7 +1161,11 @@ def gerar(df, rot, nome_norm, tab, out, registros_sancoes, fontes_sancoes, raw):
     listas = gerar_listas(col, out)
     for c in ("nr", "urna", "nr_partido"):
         col[c] = df[c].to_numpy()
-    colinha = gerar_colinha(col, chapas, tab, out, raw, redes)
+    if COLINHA_ATIVA:
+        colinha = gerar_colinha(col, chapas, tab, out, raw, redes)
+    else:
+        colinha = None
+        log("colinha: desativada (COLINHA_ATIVA = False; ver docs/COLINHA.md)")
     # Painel das eleições (página painel.html): agregados por ano, UF e cargo
     from painel import gerar_painel
     gerar_painel(df, tab, out, raw, {
